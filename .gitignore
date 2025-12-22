@@ -1,0 +1,17 @@
+# macOS
+.DS_Store
+
+# Windows  
+Thumbs.db
+
+# REAPER
+*.rpp-bak
+*.RPP-bak
+
+# User configs
+RAPID_Config.ini
+RAPID.ini
+
+# IDE
+.vscode/
+.idea/

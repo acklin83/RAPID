@@ -97,6 +97,86 @@ local DEFAULT_PROFILE_ALIASES = {
 }
 
 
+-- ===== MIXNOTE THEME =====
+local THEME_COLOR_COUNT = 26
+local THEME_VAR_COUNT = 10
+
+-- Backgrounds (4-level hierarchy)
+local bg_body   = 0x0F0F0FFF
+local bg_card   = 0x1A1A1AFF
+local bg_input  = 0x2A2A2AFF
+local bg_border = 0x3A3A3AFF
+
+-- Accent (Indigo)
+local accent        = 0x6366F1FF
+local accent_hover  = 0x5558E8FF
+local accent_active = 0x4F46E5FF
+local accent_dim    = 0x6366F140
+
+-- Text
+local text       = 0xE5E7EBFF
+local text_dim   = 0x9CA3AFFF
+local text_muted = 0x6B7280FF
+
+-- Status
+local clr_green  = 0x4ADE80FF
+local clr_amber  = 0xF59E0BFF
+local clr_red    = 0xEF4444FF
+
+local function apply_theme()
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_WindowBg(),       bg_body)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ChildBg(),        0x00000000)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(),        bg_card)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Border(),         bg_border)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(),           text)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TextDisabled(),   text_muted)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(),        bg_input)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgHovered(), bg_border)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgActive(),  bg_border)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(),         accent)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(),  accent_hover)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(),   accent_active)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Header(),         accent_dim)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(),  0x6366F160)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(),   0x6366F180)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Tab(),            bg_card)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TabHovered(),     accent)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ScrollbarBg(),    bg_body)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ScrollbarGrab(),  bg_border)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ScrollbarGrabHovered(), text_muted)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ScrollbarGrabActive(),  text_dim)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Separator(),      bg_border)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_CheckMark(),      accent)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TitleBg(),        bg_body)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TitleBgActive(),  bg_card)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TitleBgCollapsed(), bg_body)
+
+    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_WindowPadding(),     12, 12)
+    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_FramePadding(),      8, 5)
+    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_ItemSpacing(),       8, 6)
+    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_FrameRounding(),     4)
+    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_WindowRounding(),    6)
+    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_ChildRounding(),     4)
+    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_PopupRounding(),     4)
+    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_ScrollbarRounding(), 4)
+    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_GrabRounding(),      4)
+    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_WindowBorderSize(),  0)
+end
+
+local function pop_theme()
+    r.ImGui_PopStyleColor(ctx, THEME_COLOR_COUNT)
+    r.ImGui_PopStyleVar(ctx, THEME_VAR_COUNT)
+end
+
+local function sec_button(label)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(),        bg_input)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), bg_border)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(),  text_muted)
+    local pressed = r.ImGui_SmallButton(ctx, label)
+    r.ImGui_PopStyleColor(ctx, 3)
+    return pressed
+end
+
 -- ===== MODE STATE =====
 local importMode = true      -- Import & mapping functionality (RAPID)
 local normalizeMode = true   -- Normalization functionality (Little Joe)
@@ -6539,6 +6619,8 @@ end
 
 -- ===== MAIN LOOP =====
 local function loop()
+    apply_theme()
+
     if not win_init_applied then
         local x, y, w, h = loadWinGeom()
         if x and y and w and h then
@@ -6549,9 +6631,9 @@ local function loop()
         end
         win_init_applied = true
     end
-    
+
     local visible, open = r.ImGui_Begin(ctx, WINDOW_TITLE, true, r.ImGui_WindowFlags_NoSavedSettings())
-    
+
     if visible then
         local ok, err = xpcall(function()
             drawUI_body()
@@ -6561,19 +6643,21 @@ local function loop()
                 saveWinGeom(math.floor(wx + 0.5), math.floor(wy + 0.5), math.floor(ww + 0.5), math.floor(wh + 0.5))
             end
         end, debug.traceback)
-        
+
         if not ok then
             showError("ERROR in UI:\n" .. tostring(err))
         end
-        
+
         r.ImGui_End(ctx)
     end
-    
+
     drawSettingsWindow()
     drawHelpWindow()
-    
+
+    pop_theme()
+
     if should_close or (not open) then return end
-    
+
     r.defer(loop)
 end
 

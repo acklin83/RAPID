@@ -4,7 +4,7 @@
 
 **RAPID** (Recording Auto-Placement & Intelligent Dynamics) — a professional workflow automation tool for REAPER (DAW), written as a single Lua script.
 
-- **Current Version:** 2.1 (November 2025)
+- **Current Version:** 2.2 (February 2026)
 - **Developer:** Frank
 - **License:** MIT
 
@@ -61,6 +61,14 @@
 - Inline comments in English
 - No external module system — all code in one file
 
+## UI Theme (v2.2+)
+
+- **MixnoteStyle** dark theme applied via `apply_theme()` / `pop_theme()` in the main loop
+- 26 color pushes + 10 style var pushes — counts must match exactly
+- `sec_button(label)` helper for secondary/non-primary action buttons
+- `ctx` must be declared before theme functions (Lua upvalue binding)
+- See `MixnoteStyle.md` for the full design system reference
+
 ## Important Notes
 
 - **Do not split the file into modules** without explicit instruction
@@ -78,6 +86,7 @@
 - v1.5 (Nov 2025): Major refactor — 60% code reduction, 10x perf improvement
 - v2.0 (Nov 2025): Unified workflow — merged RAPID + Little Joe, 29% line reduction
 - v2.1 (Nov 2025): Auto-duplicate feature for multi-slot mapping
+- v2.2 (Feb 2026): MixnoteStyle dark theme, compact UI layout, sec_button helper
 
 ## Files
 
@@ -88,3 +97,5 @@
 | `CHANGELOG.md` | Version history |
 | `LICENSE` | MIT License |
 | `CLAUDE.md` | This file — context for Claude Code |
+| `MixnoteStyle.md` | UI design system (dark theme reference) |
+| `roadmap.md` | Development roadmap |

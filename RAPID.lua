@@ -1,23 +1,31 @@
- -- RAPID - Recording Auto-Placement & Intelligent Dynamics v2.1
--- 
+ -- RAPID - Recording Auto-Placement & Intelligent Dynamics v2.2
+--
 -- Unified version combining RAPID (Import & Mapping) with Little Joe (Normalize-Only)
--- 
+--
 -- Modes:
 -- ------
--- [Ã¢Å“â€œ] Import  [Ã¢Å“â€œ] Normalize = Full RAPID workflow (import + map + normalize)
--- [Ã¢Å“â€œ] Import  [ ] Normalize = Import & map only (no normalization)
--- [ ] Import  [Ã¢Å“â€œ] Normalize = Little Joe mode (normalize existing tracks)
--- 
+-- [x] Import  [x] Normalize = Full RAPID workflow (import + map + normalize)
+-- [x] Import  [ ] Normalize = Import & map only (no normalization)
+-- [ ] Import  [x] Normalize = Little Joe mode (normalize existing tracks)
+--
 -- See Project Notes for full documentation
 --
+-- NEW in v2.2:
+-- - MixnoteStyle dark theme (Indigo accent, 4-level background hierarchy)
+-- - Compact toolbar layout (single row, sec_button for secondary actions)
+-- - Settings/Help moved to header (right-aligned)
+-- - Reduced padding/spacing for denser data display
+-- - Action buttons: Preview left, Commit/Close right-aligned
+-- - Shorter option labels (New lane, Per region, Delete gaps, Copy media)
+--
 -- NEW in v2.1:
--- - Auto-Duplicate: Automatically creates duplicate template tracks when multiple 
+-- - Auto-Duplicate: Automatically creates duplicate template tracks when multiple
 --   recording sources match to the same template track
 
 local r = reaper
 
 -- ===== VERSION =====
-local VERSION = "2.1"
+local VERSION = "2.2"
 local WINDOW_TITLE = "RAPID v" .. VERSION
 
 -- ===== Capability checks =====
@@ -97,6 +105,89 @@ local DEFAULT_PROFILE_ALIASES = {
 }
 
 
+-- ===== ImGui Context (forward declaration for theme functions) =====
+local ctx
+
+-- ===== MIXNOTE THEME =====
+local THEME_COLOR_COUNT = 26
+local THEME_VAR_COUNT = 10
+
+-- Backgrounds (4-level hierarchy)
+local bg_body   = 0x0F0F0FFF
+local bg_card   = 0x1A1A1AFF
+local bg_input  = 0x2A2A2AFF
+local bg_border = 0x3A3A3AFF
+
+-- Accent (Indigo)
+local accent        = 0x6366F1FF
+local accent_hover  = 0x5558E8FF
+local accent_active = 0x4F46E5FF
+local accent_dim    = 0x6366F140
+
+-- Text
+local text       = 0xE5E7EBFF
+local text_dim   = 0x9CA3AFFF
+local text_muted = 0x6B7280FF
+
+-- Status
+local clr_green  = 0x4ADE80FF
+local clr_amber  = 0xF59E0BFF
+local clr_red    = 0xEF4444FF
+
+local function apply_theme()
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_WindowBg(),       bg_body)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ChildBg(),        0x00000000)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(),        bg_card)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Border(),         bg_border)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(),           text)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TextDisabled(),   text_muted)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(),        bg_input)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgHovered(), bg_border)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgActive(),  bg_border)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(),         accent)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(),  accent_hover)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(),   accent_active)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Header(),         accent_dim)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(),  0x6366F160)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(),   0x6366F180)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Tab(),            bg_card)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TabHovered(),     accent)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ScrollbarBg(),    bg_body)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ScrollbarGrab(),  bg_border)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ScrollbarGrabHovered(), text_muted)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ScrollbarGrabActive(),  text_dim)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Separator(),      bg_border)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_CheckMark(),      accent)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TitleBg(),        bg_body)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TitleBgActive(),  bg_card)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TitleBgCollapsed(), bg_body)
+
+    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_WindowPadding(),     8, 8)
+    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_FramePadding(),      6, 3)
+    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_ItemSpacing(),       8, 4)
+    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_FrameRounding(),     4)
+    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_WindowRounding(),    6)
+    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_ChildRounding(),     4)
+    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_PopupRounding(),     4)
+    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_ScrollbarRounding(), 4)
+    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_GrabRounding(),      4)
+    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_WindowBorderSize(),  0)
+end
+
+local function pop_theme()
+    r.ImGui_PopStyleColor(ctx, THEME_COLOR_COUNT)
+    r.ImGui_PopStyleVar(ctx, THEME_VAR_COUNT)
+end
+
+local function sec_button(label)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(),        bg_input)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), bg_border)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(),  text_muted)
+    local pressed = r.ImGui_SmallButton(ctx, label)
+    r.ImGui_PopStyleColor(ctx, 3)
+    return pressed
+end
+
 -- ===== MODE STATE =====
 local importMode = true      -- Import & mapping functionality (RAPID)
 local normalizeMode = true   -- Normalization functionality (Little Joe)
@@ -150,7 +241,6 @@ local tracks = {}          -- Array of {track, name} for normalize-only mode
 local normMapDirect = {}   -- Maps track index -> {profile, targetPeak} for normalize-only mode
 
 -- UI state
-local ctx
 local previewMode = false
 local showSettings = false
 local showHelp = false
@@ -3984,31 +4074,29 @@ end
 
 -- ===== UI: MAIN WINDOW =====
 local function drawUI_body()
-    -- ===== MODE SELECTION =====
+    -- ===== HEADER: Title + Mode + Settings/Help =====
     r.ImGui_Text(ctx, "RAPID v" .. VERSION)
     r.ImGui_SameLine(ctx)
-    r.ImGui_Dummy(ctx, 20, 0)
+    r.ImGui_Dummy(ctx, 12, 0)
     r.ImGui_SameLine(ctx)
-    
-    -- Mode checkboxes
+
     r.ImGui_Text(ctx, "Mode:")
     r.ImGui_SameLine(ctx)
-    
+
     local importChanged, importVal = r.ImGui_Checkbox(ctx, "Import", settings.importMode)
     if importChanged then
         settings.importMode = importVal
         importMode = importVal
         saveIni()
     end
-    
+
     r.ImGui_SameLine(ctx)
     local normalizeChanged, normalizeVal = r.ImGui_Checkbox(ctx, "Normalize", settings.normalizeMode)
     if normalizeChanged then
         settings.normalizeMode = normalizeVal
         normalizeMode = normalizeVal
         saveIni()
-        
-        -- If switching to normalize-only mode, load tracks
+
         if normalizeMode and not importMode and #tracks == 0 then
             loadTracksWithItems()
             if settings.autoMatchProfilesOnImport then
@@ -4016,64 +4104,37 @@ local function drawUI_body()
             end
         end
     end
-    
-    -- Error check: at least one mode must be active
+
     if not importMode and not normalizeMode then
         r.ImGui_TextColored(ctx, 0xFF0000FF, " ERROR: At least one mode required!")
         settings.importMode = true
         importMode = true
         return
     end
-    
-    r.ImGui_Separator(ctx)
-    
-    -- ===== IMPORT MODE UI =====
-    if importMode then
-    r.ImGui_Text(ctx, "Import Mode")
-    r.ImGui_SameLine(ctx)
-    
-    if r.ImGui_Button(ctx, "Reload Mix Targets") then
-        rebuildMixTargets()
-        applyLastMap()
-        r.TrackList_AdjustWindows(false)
-        r.UpdateArrange()
-    end
-    
-    r.ImGui_SameLine(ctx)
-    if r.ImGui_Button(ctx, "Auto-match Tracks") then
-        autosuggest()
-    end
-    
-    -- Only show "Auto-match Profiles" if normalize mode is enabled
-    if normalizeMode then
-        r.ImGui_SameLine(ctx)
-        if r.ImGui_Button(ctx, "Auto-match Profiles") then
-            autoMatchProfiles()
-        end
-    end
-    
-    r.ImGui_SameLine(ctx)
-    if r.ImGui_Button(ctx, "Settings") then
+
+    -- Settings/Help right-aligned in header
+    r.ImGui_SameLine(ctx, r.ImGui_GetWindowWidth(ctx) - 120)
+    if sec_button("Settings") then
         showSettings = true
     end
-    
     r.ImGui_SameLine(ctx)
-    if r.ImGui_Button(ctx, "Help") then
+    if sec_button("Help") then
         showHelp = true
     end
-    
+
     r.ImGui_Separator(ctx)
-    r.ImGui_Text(ctx, "Recording sources:")
-    r.ImGui_SameLine(ctx)
-    
+
+    -- ===== IMPORT MODE UI =====
+    if importMode then
+
+    -- Toolbar row 1: Load sources + Auto-match + Reload
     if r.ImGui_Button(ctx, "Load .RPP") then
         local ok, p = r.GetUserFileNameForRead("", "Select Recording .RPP", ".rpp")
         if ok then
             recSources = {}
             loadRecRPP(p)
             applyLastMap()
-            
-            -- Auto-match if enabled
+
             if settings.autoMatchTracksOnImport then
                 autosuggest()
             end
@@ -4082,15 +4143,14 @@ local function drawUI_body()
             end
         end
     end
-    
+
     r.ImGui_SameLine(ctx)
     if r.ImGui_Button(ctx, "Load audio files") then
         local before = #recSources
         loadRecFiles()
-        if #recSources > before then 
+        if #recSources > before then
             applyLastMap()
-            
-            -- Auto-match if enabled
+
             if settings.autoMatchTracksOnImport then
                 autosuggest()
             end
@@ -4099,25 +4159,51 @@ local function drawUI_body()
             end
         end
     end
-    
+
     r.ImGui_SameLine(ctx)
-    if r.ImGui_Button(ctx, "Import Markers/Regions/Tempo") then
+    r.ImGui_Dummy(ctx, 8, 0)
+    r.ImGui_SameLine(ctx)
+
+    if r.ImGui_Button(ctx, "Auto-match Tracks") then
+        autosuggest()
+    end
+
+    if normalizeMode then
+        r.ImGui_SameLine(ctx)
+        if r.ImGui_Button(ctx, "Auto-match Profiles") then
+            autoMatchProfiles()
+        end
+    end
+
+    r.ImGui_SameLine(ctx)
+    r.ImGui_Dummy(ctx, 8, 0)
+    r.ImGui_SameLine(ctx)
+
+    if sec_button("Reload Mix Targets") then
+        rebuildMixTargets()
+        applyLastMap()
+        r.TrackList_AdjustWindows(false)
+        r.UpdateArrange()
+    end
+
+    r.ImGui_SameLine(ctx)
+    if sec_button("Import Markers") then
         if recPathRPP and recPathRPP ~= "" then
             importMarkersTempoPostCommit()
         else
             r.ShowMessageBox("Please load a Recording .RPP first.", "No RPP Loaded", 0)
         end
     end
-    
+
     r.ImGui_SameLine(ctx)
-    if r.ImGui_Button(ctx, "Clear list") then
+    if sec_button("Clear list") then
         clearRecList()
         map = {}
         for i = 1, #mixTargets do map[i] = {0} end
     end
-    
+
     r.ImGui_SameLine(ctx)
-    if r.ImGui_Button(ctx, ONLY_WITH_MEDIA and "Show all RPP tracks" or "Only RPP w/ media") then
+    if sec_button(ONLY_WITH_MEDIA and "Show all RPP tracks" or "Only RPP w/ media") then
         ONLY_WITH_MEDIA = not ONLY_WITH_MEDIA
         if recPathRPP then
             local mapByName = {}
@@ -4127,15 +4213,15 @@ local function drawUI_body()
                     mapByName[mixName] = recSources[map[i][1]].name
                 end
             end
-            
+
             local keepFiles = {}
             for _, e in ipairs(recSources) do
                 if e.src == "file" then keepFiles[#keepFiles + 1] = e end
             end
-            
+
             recSources = keepFiles
             loadRecRPP(recPathRPP)
-            
+
             for i, tr in ipairs(mixTargets) do
                 local mixName = nameCache[tr] or trName(tr)
                 if mapByName[mixName] then
@@ -4150,11 +4236,13 @@ local function drawUI_body()
             applyLastMap()
         end
     end
-    
+
+    -- RPP path info (compact)
     if recPathRPP then
-        r.ImGui_Text(ctx, "RPP: " .. recPathRPP)
+        r.ImGui_SameLine(ctx)
+        r.ImGui_TextColored(ctx, text_dim, "  RPP: " .. recPathRPP)
     end
-    
+
     r.ImGui_Separator(ctx)
     
     -- Bulk action section (only show if normalize mode is enabled)
@@ -4218,7 +4306,7 @@ local function drawUI_body()
     -- Calculate available height for scrollable table
     local window_h = r.ImGui_GetWindowHeight(ctx)
     local cursor_y = r.ImGui_GetCursorPosY(ctx)
-    local footer_height = 230
+    local footer_height = 90  -- v2.2: compact footer (options + action row)
     local table_height = window_h - cursor_y - footer_height
     
     local flags = r.ImGui_TableFlags_Borders() | r.ImGui_TableFlags_RowBg() | 
@@ -4765,9 +4853,10 @@ local function drawUI_body()
     end
     
     r.ImGui_Separator(ctx)
+
+    -- Options row 1: After commit + Copy media
     r.ImGui_Text(ctx, "After commit:")
     r.ImGui_SameLine(ctx)
-    
     if r.ImGui_RadioButton(ctx, "Keep unused", deleteUnusedMode == 0) then
         deleteUnusedMode = 0
     end
@@ -4775,38 +4864,32 @@ local function drawUI_body()
     if r.ImGui_RadioButton(ctx, "Delete unused", deleteUnusedMode == 1) then
         deleteUnusedMode = 1
     end
-    
-    r.ImGui_Separator(ctx)
-    
-    local _, cmc = r.ImGui_Checkbox(ctx, "Copy media into project", copyMediaOnCommit)
+    r.ImGui_SameLine(ctx)
+    r.ImGui_Dummy(ctx, 12, 0)
+    r.ImGui_SameLine(ctx)
+    local _, cmc = r.ImGui_Checkbox(ctx, "Copy media", copyMediaOnCommit)
     copyMediaOnCommit = cmc
-    
-    -- Normalization options (only shown if normalize mode is enabled)
+
+    -- Options row 2: Normalization options (horizontal)
     if normalizeMode then
-        changed, val = r.ImGui_Checkbox(ctx, "Create on new Fixed Item Lane (optional)", settings.createNewLane)
+        changed, val = r.ImGui_Checkbox(ctx, "New lane", settings.createNewLane)
         if changed then
             settings.createNewLane = val
             saveIni()
         end
-        
-        if settings.createNewLane then
-            r.ImGui_SameLine(ctx)
-            r.ImGui_TextDisabled(ctx, "(preserves original)")
-        end
-        
-        changed, val = r.ImGui_Checkbox(ctx, "Process per region", settings.processPerRegion)
+        r.ImGui_SameLine(ctx)
+        changed, val = r.ImGui_Checkbox(ctx, "Per region", settings.processPerRegion)
         if changed then
             settings.processPerRegion = val
             saveIni()
         end
-        
         if settings.processPerRegion then
             local regions = scanRegions()
             r.ImGui_SameLine(ctx)
-            r.ImGui_TextDisabled(ctx, string.format("(%d regions)", #regions))
-            
+            r.ImGui_TextColored(ctx, text_dim, string.format("(%d regions)", #regions))
             if #regions > 0 then
-                changed, val = r.ImGui_Checkbox(ctx, "Delete media between regions", settings.deleteBetweenRegions)
+                r.ImGui_SameLine(ctx)
+                changed, val = r.ImGui_Checkbox(ctx, "Delete gaps", settings.deleteBetweenRegions)
                 if changed then
                     settings.deleteBetweenRegions = val
                     saveIni()
@@ -4814,56 +4897,31 @@ local function drawUI_body()
             end
         end
     end
-    
-    -- Info box
-    if r.ImGui_BeginChild(ctx, "info", 0, 45, r.ImGui_WindowFlags_None()) then
-        local processCount = 0
-        local normCount = 0
-        
-        for i, tr in ipairs(mixTargets) do
-            local slots = map[i] or {0}
-            local hasMapping = false
-            for _, ri in ipairs(slots) do
-                if ri and ri > 0 then
-                    hasMapping = true
-                    break
-                end
-            end
-            if hasMapping then
+
+    -- Info + Action buttons: Preview left, Commit+Close right
+    local processCount = 0
+    for i, tr in ipairs(mixTargets) do
+        local slots = map[i] or {0}
+        for _, ri in ipairs(slots) do
+            if ri and ri > 0 then
                 processCount = processCount + 1
-                if normalizeMode and normMap[i] and normMap[i].profile ~= "-" then
-                    normCount = normCount + 1
-                end
+                break
             end
         end
-        
-        local infoText = string.format("Processing: %d tracks", processCount)
-        if normalizeMode and normCount > 0 then
-            infoText = infoText .. string.format(" | Normalizing: %d tracks", normCount)
-            if settings.processPerRegion then
-                -- Always use current project regions (same as checkbox display)
-                local regions = scanRegions()
-                local regionCount = #regions
-                
-                if regionCount > 0 then
-                    infoText = infoText .. string.format(" x %d regions", regionCount)
-                end
-            end
-        end
-        
-        r.ImGui_TextWrapped(ctx, infoText)
     end
-    r.ImGui_EndChild(ctx)
-    
-    if r.ImGui_Button(ctx, "Preview") then
+    r.ImGui_TextColored(ctx, text_dim, string.format("%d tracks", processCount))
+    r.ImGui_SameLine(ctx)
+    if sec_button("Preview") then
         previewMode = true
     end
-    r.ImGui_SameLine(ctx)
+
+    local win_w = r.ImGui_GetWindowWidth(ctx)
+    r.ImGui_SameLine(ctx, win_w - 170)
     if r.ImGui_Button(ctx, "Commit") then
         commitMappings()
     end
     r.ImGui_SameLine(ctx)
-    if r.ImGui_Button(ctx, "Close") then
+    if sec_button("Close") then
         should_close = true
     end
     
@@ -5001,7 +5059,7 @@ local function drawUI_body()
         -- Calculate available height for scrollable table
         local window_h = r.ImGui_GetWindowHeight(ctx)
         local cursor_y = r.ImGui_GetCursorPosY(ctx)
-        local footer_height = 180
+        local footer_height = 90  -- v2.2: compact footer
         local table_height = window_h - cursor_y - footer_height
         
         local flags = r.ImGui_TableFlags_Borders() | r.ImGui_TableFlags_RowBg() | 
@@ -5087,69 +5145,49 @@ local function drawUI_body()
         end
         
         r.ImGui_Separator(ctx)
-        
-        -- Normalization settings
-        local changed, val = r.ImGui_Checkbox(ctx, "Create on new Fixed Item Lane (optional)", settings.createNewLane)
+
+        -- Normalization options (horizontal)
+        local changed, val = r.ImGui_Checkbox(ctx, "New lane", settings.createNewLane)
         if changed then
             settings.createNewLane = val
             saveIni()
         end
-        
-        if settings.createNewLane then
-            r.ImGui_SameLine(ctx)
-            r.ImGui_TextDisabled(ctx, "(preserves original)")
-        end
-        
-        changed, val = r.ImGui_Checkbox(ctx, "Process per region", settings.processPerRegion)
+        r.ImGui_SameLine(ctx)
+        changed, val = r.ImGui_Checkbox(ctx, "Per region", settings.processPerRegion)
         if changed then
             settings.processPerRegion = val
             saveIni()
         end
-        
         if settings.processPerRegion then
             local regions = scanRegions()
             r.ImGui_SameLine(ctx)
-            r.ImGui_TextDisabled(ctx, string.format("(%d regions)", #regions))
-            
+            r.ImGui_TextColored(ctx, text_dim, string.format("(%d regions)", #regions))
             if #regions > 0 then
-                changed, val = r.ImGui_Checkbox(ctx, "Delete media between regions", settings.deleteBetweenRegions)
+                r.ImGui_SameLine(ctx)
+                changed, val = r.ImGui_Checkbox(ctx, "Delete gaps", settings.deleteBetweenRegions)
                 if changed then
                     settings.deleteBetweenRegions = val
                     saveIni()
                 end
             end
         end
-        
-        -- Info box
-        if r.ImGui_BeginChild(ctx, "norm_info", 0, 45, r.ImGui_WindowFlags_None()) then
-            local normCount = 0
-            for i = 1, #tracks do
-                if normMapDirect[i] and normMapDirect[i].profile ~= "-" then
-                    normCount = normCount + 1
-                end
+
+        -- Info + Action buttons
+        local normCount = 0
+        for i = 1, #tracks do
+            if normMapDirect[i] and normMapDirect[i].profile ~= "-" then
+                normCount = normCount + 1
             end
-            
-            local infoText = string.format("%d tracks loaded", #tracks)
-            if normCount > 0 then
-                infoText = infoText .. string.format(" | Normalizing: %d tracks", normCount)
-                if settings.processPerRegion then
-                    local regions = scanRegions()
-                    if #regions > 0 then
-                        infoText = infoText .. string.format(" x %d regions", #regions)
-                    end
-                end
-            end
-            
-            r.ImGui_TextWrapped(ctx, infoText)
         end
-        r.ImGui_EndChild(ctx)
-        
-        -- Normalize button
+        r.ImGui_TextColored(ctx, text_dim, string.format("%d tracks | %d to normalize", #tracks, normCount))
+
+        local win_w = r.ImGui_GetWindowWidth(ctx)
+        r.ImGui_SameLine(ctx, win_w - 170)
         if r.ImGui_Button(ctx, "Normalize") then
             doNormalizeDirectly()
         end
         r.ImGui_SameLine(ctx)
-        if r.ImGui_Button(ctx, "Close") then
+        if sec_button("Close") then
             should_close = true
         end
     
@@ -6539,6 +6577,8 @@ end
 
 -- ===== MAIN LOOP =====
 local function loop()
+    apply_theme()
+
     if not win_init_applied then
         local x, y, w, h = loadWinGeom()
         if x and y and w and h then
@@ -6549,9 +6589,9 @@ local function loop()
         end
         win_init_applied = true
     end
-    
+
     local visible, open = r.ImGui_Begin(ctx, WINDOW_TITLE, true, r.ImGui_WindowFlags_NoSavedSettings())
-    
+
     if visible then
         local ok, err = xpcall(function()
             drawUI_body()
@@ -6561,19 +6601,21 @@ local function loop()
                 saveWinGeom(math.floor(wx + 0.5), math.floor(wy + 0.5), math.floor(ww + 0.5), math.floor(wh + 0.5))
             end
         end, debug.traceback)
-        
+
         if not ok then
             showError("ERROR in UI:\n" .. tostring(err))
         end
-        
+
         r.ImGui_End(ctx)
     end
-    
+
     drawSettingsWindow()
     drawHelpWindow()
-    
+
+    pop_theme()
+
     if should_close or (not open) then return end
-    
+
     r.defer(loop)
 end
 

@@ -4890,9 +4890,8 @@ local function drawUI_body()
         end
     end
 
-    -- Info + Action buttons on one line
+    -- Info + Action buttons: Preview left, Commit+Close right
     local processCount = 0
-    local normCount = 0
     for i, tr in ipairs(mixTargets) do
         local slots = map[i] or {0}
         for _, ri in ipairs(slots) do
@@ -4902,16 +4901,14 @@ local function drawUI_body()
             end
         end
     end
-    local infoText = string.format("%d tracks", processCount)
-    r.ImGui_TextColored(ctx, text_dim, infoText)
+    r.ImGui_TextColored(ctx, text_dim, string.format("%d tracks", processCount))
     r.ImGui_SameLine(ctx)
-    r.ImGui_Dummy(ctx, 8, 0)
-    r.ImGui_SameLine(ctx)
-
     if sec_button("Preview") then
         previewMode = true
     end
-    r.ImGui_SameLine(ctx)
+
+    local win_w = r.ImGui_GetWindowWidth(ctx)
+    r.ImGui_SameLine(ctx, win_w - 170)
     if r.ImGui_Button(ctx, "Commit") then
         commitMappings()
     end
@@ -5175,10 +5172,9 @@ local function drawUI_body()
             end
         end
         r.ImGui_TextColored(ctx, text_dim, string.format("%d tracks | %d to normalize", #tracks, normCount))
-        r.ImGui_SameLine(ctx)
-        r.ImGui_Dummy(ctx, 8, 0)
-        r.ImGui_SameLine(ctx)
 
+        local win_w = r.ImGui_GetWindowWidth(ctx)
+        r.ImGui_SameLine(ctx, win_w - 170)
         if r.ImGui_Button(ctx, "Normalize") then
             doNormalizeDirectly()
         end

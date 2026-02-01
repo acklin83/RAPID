@@ -97,6 +97,9 @@ local DEFAULT_PROFILE_ALIASES = {
 }
 
 
+-- ===== ImGui Context (forward declaration for theme functions) =====
+local ctx
+
 -- ===== MIXNOTE THEME =====
 local THEME_COLOR_COUNT = 26
 local THEME_VAR_COUNT = 10
@@ -230,7 +233,6 @@ local tracks = {}          -- Array of {track, name} for normalize-only mode
 local normMapDirect = {}   -- Maps track index -> {profile, targetPeak} for normalize-only mode
 
 -- UI state
-local ctx
 local previewMode = false
 local showSettings = false
 local showHelp = false

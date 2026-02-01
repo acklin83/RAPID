@@ -1,23 +1,31 @@
- -- RAPID - Recording Auto-Placement & Intelligent Dynamics v2.1
--- 
+ -- RAPID - Recording Auto-Placement & Intelligent Dynamics v2.2
+--
 -- Unified version combining RAPID (Import & Mapping) with Little Joe (Normalize-Only)
--- 
+--
 -- Modes:
 -- ------
--- [Ã¢Å“â€œ] Import  [Ã¢Å“â€œ] Normalize = Full RAPID workflow (import + map + normalize)
--- [Ã¢Å“â€œ] Import  [ ] Normalize = Import & map only (no normalization)
--- [ ] Import  [Ã¢Å“â€œ] Normalize = Little Joe mode (normalize existing tracks)
--- 
+-- [x] Import  [x] Normalize = Full RAPID workflow (import + map + normalize)
+-- [x] Import  [ ] Normalize = Import & map only (no normalization)
+-- [ ] Import  [x] Normalize = Little Joe mode (normalize existing tracks)
+--
 -- See Project Notes for full documentation
 --
+-- NEW in v2.2:
+-- - MixnoteStyle dark theme (Indigo accent, 4-level background hierarchy)
+-- - Compact toolbar layout (single row, sec_button for secondary actions)
+-- - Settings/Help moved to header (right-aligned)
+-- - Reduced padding/spacing for denser data display
+-- - Action buttons: Preview left, Commit/Close right-aligned
+-- - Shorter option labels (New lane, Per region, Delete gaps, Copy media)
+--
 -- NEW in v2.1:
--- - Auto-Duplicate: Automatically creates duplicate template tracks when multiple 
+-- - Auto-Duplicate: Automatically creates duplicate template tracks when multiple
 --   recording sources match to the same template track
 
 local r = reaper
 
 -- ===== VERSION =====
-local VERSION = "2.1"
+local VERSION = "2.2"
 local WINDOW_TITLE = "RAPID v" .. VERSION
 
 -- ===== Capability checks =====
@@ -4298,7 +4306,7 @@ local function drawUI_body()
     -- Calculate available height for scrollable table
     local window_h = r.ImGui_GetWindowHeight(ctx)
     local cursor_y = r.ImGui_GetCursorPosY(ctx)
-    local footer_height = 150
+    local footer_height = 90  -- v2.2: compact footer (options + action row)
     local table_height = window_h - cursor_y - footer_height
     
     local flags = r.ImGui_TableFlags_Borders() | r.ImGui_TableFlags_RowBg() | 
@@ -5051,7 +5059,7 @@ local function drawUI_body()
         -- Calculate available height for scrollable table
         local window_h = r.ImGui_GetWindowHeight(ctx)
         local cursor_y = r.ImGui_GetCursorPosY(ctx)
-        local footer_height = 180
+        local footer_height = 90  -- v2.2: compact footer
         local table_height = window_h - cursor_y - footer_height
         
         local flags = r.ImGui_TableFlags_Borders() | r.ImGui_TableFlags_RowBg() | 

@@ -4540,15 +4540,14 @@ local function drawUI_body()
             for _, ri in ipairs(slots) do
                 if ri and ri > 0 then trackHasSource = true; break end
             end
-            local dimRow = (deleteUnusedMode == 1) and (not trackHasSource) and (#recSources > 0)
+            local trackName = nameCache[tr] or trName(tr)
+            local isLocked = protectedSet[trackName] and true or false
+            local hideRow = (deleteUnusedMode == 1) and (not trackHasSource) and (not isLocked) and (#recSources > 0)
 
             for s = 1, math.max(1, #slots) do
                 globalRowID = globalRowID + 1  -- Increment for each row
+                if hideRow then goto nextrow end
                 r.ImGui_TableNextRow(ctx)
-
-                if dimRow then
-                    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), text_muted)
-                end
                 
                 -- Create unique row ID for selection tracking
                 local rowID = string.format("%d_%d", i, s)
@@ -4966,10 +4965,6 @@ local function drawUI_body()
                     end
                 end
                 
-                if dimRow then
-                    r.ImGui_PopStyleColor(ctx, 1)
-                end
-
                 ::nextrow::
             end
         end

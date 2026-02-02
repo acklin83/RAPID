@@ -4438,6 +4438,40 @@ local function drawUI_body()
         
         local globalRowID = 0  -- Global counter for unique ImGui IDs
         
+        -- Pre-compute which folders have at least one child with a source or locked child
+        local folderHasContent = {}
+        if deleteUnusedMode == 1 and #recSources > 0 then
+            -- Walk backwards: if a track has source/is locked, mark all parent folders
+            local parentStack = {}  -- stack of folder indices
+            for i, tr in ipairs(mixTargets) do
+                local fd = folderDepth(tr)
+                if fd == 1 then
+                    -- Folder start: push onto stack
+                    parentStack[#parentStack + 1] = i
+                end
+                -- Check if this track contributes content
+                local hasSource = false
+                if map[i] then
+                    for si = 1, #map[i] do
+                        if map[i][si] and map[i][si] > 0 then hasSource = true; break end
+                    end
+                end
+                local tn = nameCache[tr] or trName(tr)
+                if hasSource or (protectedSet[tn] and true or false) then
+                    -- Mark all parent folders as having content
+                    for _, pi in ipairs(parentStack) do
+                        folderHasContent[pi] = true
+                    end
+                end
+                if fd < 0 then
+                    -- Folder end: pop from stack (may pop multiple levels)
+                    for _ = 1, math.abs(fd) do
+                        if #parentStack > 0 then parentStack[#parentStack] = nil end
+                    end
+                end
+            end
+        end
+
         for i, tr in ipairs(mixTargets) do
             local slots = map[i] or {0}
 
@@ -4451,7 +4485,16 @@ local function drawUI_body()
             local trackName = nameCache[tr] or trName(tr)
             local isLocked = protectedSet[trackName] and true or false
             local isFolder = not isLeafCached(tr)
-            local hideRow = (deleteUnusedMode == 1) and (not trackHasSource) and (not isLocked) and (not isFolder) and (#recSources > 0)
+            local hideRow
+            if deleteUnusedMode == 1 and #recSources > 0 then
+                if isFolder then
+                    hideRow = not isLocked and not folderHasContent[i]
+                else
+                    hideRow = not trackHasSource and not isLocked
+                end
+            else
+                hideRow = false
+            end
 
             for s = 1, math.max(1, #slots) do
                 globalRowID = globalRowID + 1  -- Increment for each row
@@ -4850,6 +4893,7 @@ local function drawUI_body()
                 
                 -- Plus button column (last column)
                 r.ImGui_TableSetColumnIndex(ctx, normalizeMode and 9 or 7)
+                -- "+" on the last slot row, "-" on duplicate slots (s > 1)
                 if s == #slots then
                     if r.ImGui_Button(ctx, "+##add_" .. globalRowID) then
                         local newSlot = #slots + 1
@@ -4863,9 +4907,19 @@ local function drawUI_body()
                             }
                         end
                     end
-                else
+                end
+                if s > 1 then
+                    r.ImGui_SameLine(ctx)
                     if r.ImGui_Button(ctx, "-##del_" .. globalRowID) then
                         table.remove(map[i], s)
+                        -- Clean up slotNameOverride
+                        if slotNameOverride[i] then
+                            slotNameOverride[i][s] = nil
+                        end
+                        -- Clean up normMap
+                        if normMap[i] then
+                            table.remove(normMap[i], s)
+                        end
                     end
                 end
                 

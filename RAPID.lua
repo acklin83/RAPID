@@ -3704,10 +3704,18 @@ local function commitMappings()
         local firstEntry = recSources[op.recIdxs[1]]
         local firstNew = replaceMixWithSourceAtSamePosition(firstEntry, mixTr)
         
-        -- First track: use slot 1 settings
-        local firstKeepName = (keepMap[mixIdx][1] == true)
-        local firstKeepFX = (fxMap[mixIdx][1] == true)  -- NEW: Check Keep FX setting
-        local firstName = firstKeepName and (firstEntry.name or mixName) or mixName
+        -- First track: use settings from original slot index
+        local firstOrigSlot = op.slotIdxs and op.slotIdxs[1] or 1
+        local firstKeepName = (keepMap[mixIdx][firstOrigSlot] == true)
+        local firstKeepFX = (fxMap[mixIdx][firstOrigSlot] == true)
+        local firstName
+        if slotNameOverride[mixIdx] and slotNameOverride[mixIdx][firstOrigSlot] then
+            firstName = slotNameOverride[mixIdx][firstOrigSlot]
+        elseif firstKeepName then
+            firstName = firstEntry.name or mixName
+        else
+            firstName = mixName
+        end
         local created = {}
         
         if validTrack(firstNew) then

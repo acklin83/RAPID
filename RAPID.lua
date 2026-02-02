@@ -4535,14 +4535,27 @@ local function drawUI_body()
         for i, tr in ipairs(mixTargets) do
             local slots = map[i] or {0}
 
-            -- Check if this track has any source mapped
+            -- Check if this track (or any of its slots) has a source mapped
             local trackHasSource = false
-            for _, ri in ipairs(slots) do
-                if ri and ri > 0 then trackHasSource = true; break end
+            if map[i] then
+                for si = 1, #map[i] do
+                    if map[i][si] and map[i][si] > 0 then trackHasSource = true; break end
+                end
             end
             local trackName = nameCache[tr] or trName(tr)
             local isLocked = protectedSet[trackName] and true or false
-            local hideRow = (deleteUnusedMode == 1) and (not trackHasSource) and (not isLocked) and (#recSources > 0)
+            local isFolder = not isLeafCached(tr)
+            local hideRow = (deleteUnusedMode == 1) and (not trackHasSource) and (not isLocked) and (not isFolder) and (#recSources > 0)
+            -- DEBUG: log hide decisions (remove after fix)
+            if deleteUnusedMode == 1 and #recSources > 0 then
+                local slotStr = "["
+                if map[i] then
+                    for si = 1, #map[i] do slotStr = slotStr .. tostring(map[i][si]) .. "," end
+                end
+                slotStr = slotStr .. "]"
+                r.ShowConsoleMsg(string.format("i=%d '%s' slots=%s hasSrc=%s locked=%s folder=%s hide=%s\n",
+                    i, trackName, slotStr, tostring(trackHasSource), tostring(isLocked), tostring(isFolder), tostring(hideRow)))
+            end
 
             for s = 1, math.max(1, #slots) do
                 globalRowID = globalRowID + 1  -- Increment for each row

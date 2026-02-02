@@ -2434,6 +2434,8 @@ local function postprocessTrackCopyRelink(track, doCopy)
     if not track or not r.ValidatePtr(track, "MediaTrack*") then return end
 
     local item_cnt = r.CountTrackMediaItems(track)
+    r.ShowConsoleMsg(string.format("postprocessRelink: %d items, doCopy=%s\n", item_cnt, tostring(doCopy)))
+
     for i = 0, item_cnt - 1 do
         local item = r.GetTrackMediaItem(track, i)
         if item then
@@ -2444,9 +2446,9 @@ local function postprocessTrackCopyRelink(track, doCopy)
                     local src = r.GetMediaItemTake_Source(take)
                     if src then
                         local _, cur = r.GetMediaSourceFileName(src, "")
+                        r.ShowConsoleMsg(string.format("  take %d: src='%s' exists=%s\n", t, cur or "nil", tostring(fileExists(cur or ""))))
                         if cur and #cur > 0 then
                             if doCopy then
-                                -- Copy mode: copy file to project media dir and relink
                                 local newPath = copyMediaToProject(cur)
                                 if newPath and newPath ~= cur then
                                     local newSrc = r.PCM_Source_CreateFromFile(newPath)
@@ -2455,16 +2457,21 @@ local function postprocessTrackCopyRelink(track, doCopy)
                                     end
                                 end
                             elseif not fileExists(cur) then
-                                -- No-copy mode: if source is offline, try to resolve it
+                                -- No-copy mode: resolve and relink offline sources
                                 local resolved = resolveMediaPath(cur, recPathRPPDir)
+                                -- Also try basename only in rppDir
+                                if not resolved then
+                                    local bn = getBasename(cur)
+                                    resolved = resolveMediaPath(bn, recPathRPPDir)
+                                end
                                 if resolved and fileExists(resolved) then
-                                    log(string.format("  postprocess relink: '%s' -> '%s'\n", cur, resolved))
+                                    log(string.format("    relink: '%s' -> '%s'\n", cur, resolved))
                                     local newSrc = r.PCM_Source_CreateFromFile(resolved)
                                     if newSrc then
                                         r.SetMediaItemTake_Source(take, newSrc)
                                     end
                                 else
-                                    log(string.format("  postprocess relink: STILL OFFLINE '%s'\n", cur))
+                                    log(string.format("    STILL OFFLINE: '%s' (rppDir='%s')\n", cur, recPathRPPDir or "nil"))
                                 end
                             end
                         end
@@ -2796,8 +2803,25 @@ local function replaceMixWithSourceAtSamePosition(entry, mixTr)
         end
         
         local chunk = sanitizeChunk(entry.chunk)
+
+        -- DEBUG: show FILE lines before fix
+        for line in chunk:gmatch("[^\n]+") do
+            if line:match("^%s*FILE%s+") then
+                r.ShowConsoleMsg("BEFORE fixChunk FILE: " .. line .. "\n")
+            end
+        end
+        r.ShowConsoleMsg("recPathRPPDir = " .. tostring(recPathRPPDir) .. "\n")
+        r.ShowConsoleMsg("copyMediaOnCommit = " .. tostring(copyMediaOnCommit) .. "\n")
+
         chunk = fixChunkMediaPaths(chunk, copyMediaOnCommit)
-        
+
+        -- DEBUG: show FILE lines after fix
+        for line in chunk:gmatch("[^\n]+") do
+            if line:match("^%s*FILE%s+") then
+                r.ShowConsoleMsg("AFTER fixChunk FILE: " .. line .. "\n")
+            end
+        end
+
         -- CRITICAL: Add POOLEDENV data to track chunk if this track has automation items
         if entry.pooledEnvs and #entry.pooledEnvs > 0 then
             log("  Adding POOLEDENV data to track chunk...\n")

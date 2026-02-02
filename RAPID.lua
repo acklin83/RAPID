@@ -3675,13 +3675,15 @@ local function commitMappings()
         if validTrack(mixTr) then
             local slots = map[i] or {0}
             local chosen = {}
-            for _, ri in ipairs(slots) do
+            local chosenSlots = {}  -- original slot indices
+            for si, ri in ipairs(slots) do
                 if ri and ri > 0 and recSources[ri] then
                     chosen[#chosen + 1] = ri
+                    chosenSlots[#chosenSlots + 1] = si
                 end
             end
             if #chosen > 0 then
-                ops[#ops + 1] = {mixIndex = i, mixTr = mixTr, recIdxs = chosen}
+                ops[#ops + 1] = {mixIndex = i, mixTr = mixTr, recIdxs = chosen, slotIdxs = chosenSlots}
             end
         end
     end
@@ -3735,17 +3737,16 @@ local function commitMappings()
             local entry = recSources[op.recIdxs[s]]
             
             -- Each duplicate gets its own keep name setting
-            local slotKeepName = (keepMap[mixIdx][s] == true)
+            local origSlot = op.slotIdxs and op.slotIdxs[s] or s
+            local slotKeepName = (keepMap[mixIdx][origSlot] == true)
             local slotName
 
             -- Check for user-defined name override first
-            if slotNameOverride[mixIdx] and slotNameOverride[mixIdx][s] then
-                slotName = slotNameOverride[mixIdx][s]
+            if slotNameOverride[mixIdx] and slotNameOverride[mixIdx][origSlot] then
+                slotName = slotNameOverride[mixIdx][origSlot]
             elseif slotKeepName then
-                -- Keep source name (e.g. "BVoc Fabio", "BVoc Lib")
                 slotName = entry.name or (mixName .. " " .. s)
             else
-                -- Use mix template name with number (e.g. "BVoc 2", "BVoc 3")
                 slotName = mixName .. " " .. s
             end
             
@@ -4546,16 +4547,6 @@ local function drawUI_body()
             local isLocked = protectedSet[trackName] and true or false
             local isFolder = not isLeafCached(tr)
             local hideRow = (deleteUnusedMode == 1) and (not trackHasSource) and (not isLocked) and (not isFolder) and (#recSources > 0)
-            -- DEBUG: log hide decisions (remove after fix)
-            if deleteUnusedMode == 1 and #recSources > 0 then
-                local slotStr = "["
-                if map[i] then
-                    for si = 1, #map[i] do slotStr = slotStr .. tostring(map[i][si]) .. "," end
-                end
-                slotStr = slotStr .. "]"
-                r.ShowConsoleMsg(string.format("i=%d '%s' slots=%s hasSrc=%s locked=%s folder=%s hide=%s\n",
-                    i, trackName, slotStr, tostring(trackHasSource), tostring(isLocked), tostring(isFolder), tostring(hideRow)))
-            end
 
             for s = 1, math.max(1, #slots) do
                 globalRowID = globalRowID + 1  -- Increment for each row

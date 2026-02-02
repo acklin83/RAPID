@@ -4283,7 +4283,7 @@ local function drawUI_body()
         local COLFIX = r.ImGui_TableColumnFlags_WidthFixed()
         r.ImGui_TableSetupColumn(ctx, "Sel", COLFIX, 25.0)
         r.ImGui_TableSetupColumn(ctx, "##color", COLFIX, 18.0)  -- Color swatch (no title)
-        r.ImGui_TableSetupColumn(ctx, "\xF0\x9F\x94\x92", COLFIX, 25.0)  -- Lock column (🔒)
+        r.ImGui_TableSetupColumn(ctx, "Lk", COLFIX, 25.0)  -- Lock column
         r.ImGui_TableSetupColumn(ctx, "Template Destinations")  -- Mix tracks
         r.ImGui_TableSetupColumn(ctx, "Recording Sources")
         r.ImGui_TableSetupColumn(ctx, "Keep name", COLFIX, 80.0)

@@ -4642,17 +4642,13 @@ local function drawUI_body()
                         if not r.ImGui_IsItemActive(ctx) and not r.ImGui_IsItemDeactivated(ctx) then
                             r.ImGui_SetKeyboardFocusHere(ctx, -1)
                         end
-                        if changed then
-                            -- Enter pressed: apply rename
+                        if changed or r.ImGui_IsItemDeactivated(ctx) then
+                            -- Apply on Enter or when leaving the field
                             local trimmed = (editingDestBuf or ""):gsub("^%s+", ""):gsub("%s+$", "")
                             if trimmed ~= "" then
                                 r.GetSetMediaTrackInfo_String(tr, "P_NAME", trimmed, true)
                                 nameCache[tr] = trimmed
                             end
-                            editingDestTrack = nil
-                            editingDestBuf = ""
-                        elseif r.ImGui_IsItemDeactivated(ctx) then
-                            -- Lost focus / Escape: cancel
                             editingDestTrack = nil
                             editingDestBuf = ""
                         end
@@ -4913,6 +4909,13 @@ local function drawUI_body()
                     if r.ImGui_Button(ctx, "+##add_" .. globalRowID) then
                         map[i] = slots
                         map[i][#slots + 1] = 0
+                        -- Copy normalize params from slot 1
+                        if normMap[i] and normMap[i][1] then
+                            normMap[i][#slots + 1] = {
+                                profile = normMap[i][1].profile,
+                                targetPeak = normMap[i][1].targetPeak
+                            }
+                        end
                     end
                 else
                     if r.ImGui_Button(ctx, "-##del_" .. globalRowID) then

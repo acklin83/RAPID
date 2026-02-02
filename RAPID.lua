@@ -2378,45 +2378,61 @@ end
 
 local function fixChunkMediaPaths(chunk, doCopy)
     if not chunk then return chunk end
-    
+
     local mediaPaths = extractMediaPathsFromChunk(chunk)
     if #mediaPaths == 0 then return chunk end
-    
+
     local newChunk = chunk
-    
+
     for _, oldPath in ipairs(mediaPaths) do
         local resolvedPath = resolveMediaPath(oldPath, recPathRPPDir)
-        
+
+        -- Also try with backslash variant if forward-slash resolve failed
+        if not resolvedPath and oldPath:find("\\") then
+            resolvedPath = resolveMediaPath(oldPath:gsub("\\", "/"), recPathRPPDir)
+        end
+        if not resolvedPath and oldPath:find("/") then
+            resolvedPath = resolveMediaPath(oldPath:gsub("/", "\\"), recPathRPPDir)
+        end
+
         if resolvedPath and fileExists(resolvedPath) then
             local finalPath = resolvedPath
-            
+
             if doCopy then
                 finalPath = copyMediaToProject(resolvedPath)
             end
-            
+
+            log(string.format("  fixChunkMediaPaths: '%s' -> '%s'\n", oldPath, finalPath))
+
             if finalPath ~= oldPath then
-                local quotedOld = '"' .. oldPath .. '"'
-                local quotedNew = '"' .. finalPath .. '"'
-                local replaced = newChunk:gsub(quotedOld:gsub("([%.%-%+%*%?%[%]%(%)%^%$%%])", "%%%1"), quotedNew)
-                
+                -- Escape pattern special chars in oldPath for matching
+                local escapedOld = oldPath:gsub("([%.%-%+%*%?%[%]%(%)%^%$%%])", "%%%1")
+                -- Escape % in replacement string (only special char in gsub replacement)
+                local safeNew = finalPath:gsub("%%", "%%%%")
+
+                local quotedOld = '"' .. escapedOld .. '"'
+                local quotedNew = '"' .. safeNew .. '"'
+                local replaced = newChunk:gsub(quotedOld, quotedNew)
+
                 if replaced ~= newChunk then
                     newChunk = replaced
                 else
-                    local pattern = "FILE%s+" .. oldPath:gsub("([%.%-%+%*%?%[%]%(%)%^%$%%])", "%%%1")
-                    newChunk = newChunk:gsub(pattern, "FILE " .. finalPath)
+                    local pattern = "FILE%s+" .. escapedOld
+                    newChunk = newChunk:gsub(pattern, "FILE " .. safeNew)
                 end
             end
+        else
+            log(string.format("  fixChunkMediaPaths: UNRESOLVED '%s' (rppDir='%s')\n", oldPath, recPathRPPDir or "nil"))
         end
     end
-    
+
     return newChunk
 end
 
 -- ===== POST-PROCESS TRACK =====
 local function postprocessTrackCopyRelink(track, doCopy)
     if not track or not r.ValidatePtr(track, "MediaTrack*") then return end
-    if not doCopy then return end
-    
+
     local item_cnt = r.CountTrackMediaItems(track)
     for i = 0, item_cnt - 1 do
         local item = r.GetTrackMediaItem(track, i)
@@ -2429,11 +2445,26 @@ local function postprocessTrackCopyRelink(track, doCopy)
                     if src then
                         local _, cur = r.GetMediaSourceFileName(src, "")
                         if cur and #cur > 0 then
-                            local newPath = copyMediaToProject(cur)
-                            if newPath and newPath ~= cur then
-                                local newSrc = r.PCM_Source_CreateFromFile(newPath)
-                                if newSrc then
-                                    r.SetMediaItemTake_Source(take, newSrc)
+                            if doCopy then
+                                -- Copy mode: copy file to project media dir and relink
+                                local newPath = copyMediaToProject(cur)
+                                if newPath and newPath ~= cur then
+                                    local newSrc = r.PCM_Source_CreateFromFile(newPath)
+                                    if newSrc then
+                                        r.SetMediaItemTake_Source(take, newSrc)
+                                    end
+                                end
+                            elseif not fileExists(cur) then
+                                -- No-copy mode: if source is offline, try to resolve it
+                                local resolved = resolveMediaPath(cur, recPathRPPDir)
+                                if resolved and fileExists(resolved) then
+                                    log(string.format("  postprocess relink: '%s' -> '%s'\n", cur, resolved))
+                                    local newSrc = r.PCM_Source_CreateFromFile(resolved)
+                                    if newSrc then
+                                        r.SetMediaItemTake_Source(take, newSrc)
+                                    end
+                                else
+                                    log(string.format("  postprocess relink: STILL OFFLINE '%s'\n", cur))
                                 end
                             end
                         end

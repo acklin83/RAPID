@@ -4,6 +4,18 @@ Version history for RAPID.
 
 ---
 
+## v2.3.1 (February 2026)
+
+**Performance:**
+- Cached `GetTrackStateChunk` in duplicate loop (eliminates 2×(N-1) serializations per mapped track)
+- Removed 7 redundant `UpdateArrange()` calls inside normalization loops (already within `PreventUIRefresh`)
+- Wrapped post-commit minimize-all-tracks loop in `PreventUIRefresh` block
+- Peak building now targets only newly created tracks instead of scanning entire project
+- Pre-computed normalization lookup table (single O(N×M) pass instead of two)
+- Media copy/relink sweep scoped to newly created tracks instead of all project items
+
+---
+
 ## v2.3 (February 2026)
 
 **New Features:**

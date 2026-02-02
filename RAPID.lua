@@ -3660,6 +3660,11 @@ local function normalizeTrackDirect(track, normalizationType, targetValue, regio
 end
 
 -- ===== COMMIT MAPPINGS =====
+-- Performance notes (v2.3.1):
+--   - firstNew chunk cached once before duplicate loop (avoids repeated GetTrackStateChunk)
+--   - UpdateArrange() removed from normalization inner loops (already inside PreventUIRefresh)
+--   - Peak building and media sweep scoped to allCreatedTracks only
+--   - Normalization lookup pre-computed once via trackNormLookup table
 local function commitMappings()
     _G.__mr_offset = 0.0
     

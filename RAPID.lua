@@ -4632,39 +4632,48 @@ local function drawUI_body()
                 
                 -- Column 2: Template Destination (Track Name)
                 r.ImGui_TableSetColumnIndex(ctx, 2)
-                if s == 1 then
-                    if editingDestTrack == tr then
-                        -- Editing mode: InputText
-                        r.ImGui_SetNextItemWidth(ctx, -1)
-                        local changed, newBuf = r.ImGui_InputText(ctx, "##destName_" .. globalRowID, editingDestBuf, r.ImGui_InputTextFlags_EnterReturnsTrue() | r.ImGui_InputTextFlags_AutoSelectAll())
-                        editingDestBuf = newBuf
-                        -- Auto-focus on first frame
-                        if not r.ImGui_IsItemActive(ctx) and not r.ImGui_IsItemDeactivated(ctx) then
-                            r.ImGui_SetKeyboardFocusHere(ctx, -1)
+                local editKey = tostring(i) .. "_" .. tostring(s)
+                if editingDestTrack == editKey then
+                    -- Editing mode: InputText (full width)
+                    r.ImGui_SetNextItemWidth(ctx, -1)
+                    local changed, newBuf = r.ImGui_InputText(ctx, "##destName_" .. globalRowID, editingDestBuf, r.ImGui_InputTextFlags_AutoSelectAll())
+                    editingDestBuf = newBuf
+                    -- Auto-focus on first frame
+                    if not r.ImGui_IsItemActive(ctx) and not r.ImGui_IsItemDeactivated(ctx) then
+                        r.ImGui_SetKeyboardFocusHere(ctx, -1)
+                    end
+                    if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+                        -- Escape: cancel without saving
+                        editingDestTrack = nil
+                        editingDestBuf = ""
+                    elseif r.ImGui_IsItemDeactivated(ctx) then
+                        -- Enter, Tab, or click away: apply
+                        local trimmed = (editingDestBuf or ""):gsub("^%s+", ""):gsub("%s+$", "")
+                        if trimmed ~= "" then
+                            r.GetSetMediaTrackInfo_String(tr, "P_NAME", trimmed, true)
+                            nameCache[tr] = trimmed
                         end
-                        if changed or r.ImGui_IsItemDeactivated(ctx) then
-                            -- Apply on Enter or when leaving the field
-                            local trimmed = (editingDestBuf or ""):gsub("^%s+", ""):gsub("%s+$", "")
-                            if trimmed ~= "" then
-                                r.GetSetMediaTrackInfo_String(tr, "P_NAME", trimmed, true)
-                                nameCache[tr] = trimmed
-                            end
-                            editingDestTrack = nil
-                            editingDestBuf = ""
-                        end
+                        editingDestTrack = nil
+                        editingDestBuf = ""
+                    end
+                else
+                    -- Display mode: Selectable (full cell width), double-click to edit
+                    local displayName
+                    if s == 1 then
+                        displayName = name .. (isLeafCached(tr) and "" or " (Folder)")
                     else
-                        -- Display mode: Text, double-click to edit
-                        r.ImGui_Text(ctx, name .. (isLeafCached(tr) and "" or " (Folder)"))
-                        if r.ImGui_IsItemHovered(ctx) then
-                            r.ImGui_SetTooltip(ctx, name)
-                        end
-                        if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseDoubleClicked(ctx, r.ImGui_MouseButton_Left()) then
-                            editingDestTrack = tr
+                        displayName = "|_ " .. name
+                    end
+                    r.ImGui_SetNextItemWidth(ctx, -1)
+                    if r.ImGui_Selectable(ctx, displayName .. "##dest_" .. globalRowID, false, r.ImGui_SelectableFlags_AllowDoubleClick()) then
+                        if r.ImGui_IsMouseDoubleClicked(ctx, r.ImGui_MouseButton_Left()) then
+                            editingDestTrack = editKey
                             editingDestBuf = name
                         end
                     end
-                else
-                    r.ImGui_Text(ctx, "|_")
+                    if r.ImGui_IsItemHovered(ctx) then
+                        r.ImGui_SetTooltip(ctx, name)
+                    end
                 end
                 
                 -- Column 3: Recording Sources

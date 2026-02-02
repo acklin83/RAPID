@@ -78,6 +78,16 @@
 - Chunk-based FX copying was tried and reverted (v1.4) — use native API (`TrackFX_CopyToTrack`)
 - Performance-critical: track operations were optimized from 20s → 2s (v1.5 refactor)
 
+## Next Priority
+
+**Fix: Imported RPP media items show as "offline"**
+
+- `fixChunkMediaPaths()` resolves relative paths via `resolveMediaPath()` and rewrites them in the chunk
+- When "Copy media" is off and files live in a subfolder (e.g. `Audio/`) of the source RPP, items can appear offline
+- Likely cause: chunk string replacement fails (regex escaping, path separator mismatch) or `resolveMediaPath()` doesn't find the file
+- Investigate: add logging to `fixChunkMediaPaths()` to trace resolved vs. unresolved paths
+- Fallback option: after `SetTrackStateChunk()`, relink sources via REAPER API (`PCM_Source_CreateFromFile`) even when "Copy media" is off
+
 ## Development History Highlights
 
 - v1.1 (Sep 2025): Initial release — basic track mapping, fuzzy matching

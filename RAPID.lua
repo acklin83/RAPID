@@ -4339,7 +4339,7 @@ local function drawUI_body()
         r.ImGui_TableSetColumnIndex(ctx, 2)
         do
             local cx, cy = r.ImGui_GetCursorScreenPos(ctx)
-            local colW = r.ImGui_GetColumnWidth(ctx)
+            local colW = 25.0  -- fixed column width
             local lineH = r.ImGui_GetTextLineHeight(ctx)
             local dl = r.ImGui_GetWindowDrawList(ctx)
             local sz = 10  -- icon size

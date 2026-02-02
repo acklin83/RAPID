@@ -254,8 +254,9 @@ local dragSelectState = nil  -- Drag selection state for Sel column
 local dragLockState = nil    -- Drag state for Lock checkbox
 local dragKeepNameState = nil -- Drag state for Keep Name checkbox
 local dragKeepFXState = nil  -- Drag state for Keep FX checkbox
-local editingDestTrack = nil -- Track pointer currently being renamed (double-click)
+local editingDestTrack = nil -- Edit key "i_s" currently being renamed (double-click)
 local editingDestBuf = ""    -- Buffer for the InputText
+local slotNameOverride = {}  -- slotNameOverride[i][s] = custom name for duplicate slots (s >= 2)
 
 -- Caches
 local hasKids = setmetatable({}, {__mode="k"})
@@ -3733,13 +3734,16 @@ local function commitMappings()
             -- Each duplicate gets its own keep name setting
             local slotKeepName = (keepMap[mixIdx][s] == true)
             local slotName
-            
-            if slotKeepName then
+
+            -- Check for user-defined name override first
+            if slotNameOverride[mixIdx] and slotNameOverride[mixIdx][s] then
+                slotName = slotNameOverride[mixIdx][s]
+            elseif slotKeepName then
                 -- Keep source name (e.g. "BVoc Fabio", "BVoc Lib")
-                slotName = entry.name or (mixName .. " " .. s)  -- CHANGED: " " instead of " ("
+                slotName = entry.name or (mixName .. " " .. s)
             else
                 -- Use mix template name with number (e.g. "BVoc 2", "BVoc 3")
-                slotName = mixName .. " " .. s  -- CHANGED: " " instead of " ("
+                slotName = mixName .. " " .. s
             end
             
             if entry and entry.src == "file" then
@@ -4633,6 +4637,13 @@ local function drawUI_body()
                 -- Column 2: Template Destination (Track Name)
                 r.ImGui_TableSetColumnIndex(ctx, 2)
                 local editKey = tostring(i) .. "_" .. tostring(s)
+                -- For slot 1: use actual track name. For slot 2+: use override or original name
+                local slotDisplayName
+                if s == 1 then
+                    slotDisplayName = name
+                else
+                    slotDisplayName = (slotNameOverride[i] and slotNameOverride[i][s]) or name
+                end
                 if editingDestTrack == editKey then
                     -- Editing mode: InputText (full width)
                     r.ImGui_SetNextItemWidth(ctx, -1)
@@ -4650,29 +4661,36 @@ local function drawUI_body()
                         -- Enter, Tab, or click away: apply
                         local trimmed = (editingDestBuf or ""):gsub("^%s+", ""):gsub("%s+$", "")
                         if trimmed ~= "" then
-                            r.GetSetMediaTrackInfo_String(tr, "P_NAME", trimmed, true)
-                            nameCache[tr] = trimmed
+                            if s == 1 then
+                                -- Slot 1: rename the actual REAPER track
+                                r.GetSetMediaTrackInfo_String(tr, "P_NAME", trimmed, true)
+                                nameCache[tr] = trimmed
+                            else
+                                -- Slot 2+: store as override (track created at commit)
+                                slotNameOverride[i] = slotNameOverride[i] or {}
+                                slotNameOverride[i][s] = trimmed
+                            end
                         end
                         editingDestTrack = nil
                         editingDestBuf = ""
                     end
                 else
                     -- Display mode: Selectable (full cell width), double-click to edit
-                    local displayName
+                    local displayLabel
                     if s == 1 then
-                        displayName = name .. (isLeafCached(tr) and "" or " (Folder)")
+                        displayLabel = slotDisplayName .. (isLeafCached(tr) and "" or " (Folder)")
                     else
-                        displayName = "|_ " .. name
+                        displayLabel = "|_ " .. slotDisplayName
                     end
                     r.ImGui_SetNextItemWidth(ctx, -1)
-                    if r.ImGui_Selectable(ctx, displayName .. "##dest_" .. globalRowID, false, r.ImGui_SelectableFlags_AllowDoubleClick()) then
+                    if r.ImGui_Selectable(ctx, displayLabel .. "##dest_" .. globalRowID, false, r.ImGui_SelectableFlags_AllowDoubleClick()) then
                         if r.ImGui_IsMouseDoubleClicked(ctx, r.ImGui_MouseButton_Left()) then
                             editingDestTrack = editKey
-                            editingDestBuf = name
+                            editingDestBuf = slotDisplayName
                         end
                     end
                     if r.ImGui_IsItemHovered(ctx) then
-                        r.ImGui_SetTooltip(ctx, name)
+                        r.ImGui_SetTooltip(ctx, slotDisplayName)
                     end
                 end
                 
@@ -4916,11 +4934,12 @@ local function drawUI_body()
                 r.ImGui_TableSetColumnIndex(ctx, normalizeMode and 8 or 6)  -- Shifted from 7/5 to 8/6
                 if s == #slots then
                     if r.ImGui_Button(ctx, "+##add_" .. globalRowID) then
+                        local newSlot = #slots + 1
                         map[i] = slots
-                        map[i][#slots + 1] = 0
+                        map[i][newSlot] = 0
                         -- Copy normalize params from slot 1
                         if normMap[i] and normMap[i][1] then
-                            normMap[i][#slots + 1] = {
+                            normMap[i][newSlot] = {
                                 profile = normMap[i][1].profile,
                                 targetPeak = normMap[i][1].targetPeak
                             }

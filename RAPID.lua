@@ -547,6 +547,7 @@ local function saveIni()
     f:write("EnableConsoleLogging=" .. tostring(settings.enableConsoleLogging) .. "\n")
     f:write("AutoMatchTracksOnImport=" .. tostring(settings.autoMatchTracksOnImport) .. "\n")
     f:write("AutoMatchProfilesOnImport=" .. tostring(settings.autoMatchProfilesOnImport) .. "\n")
+    f:write("DeleteUnused=" .. tostring(settings.deleteUnused) .. "\n")
     
     f:close()
 end
@@ -727,7 +728,9 @@ local function loadIni()
     settings.enableConsoleLogging = parseBool("EnableConsoleLogging", false)
     settings.autoMatchTracksOnImport = parseBool("AutoMatchTracksOnImport", true)
     settings.autoMatchProfilesOnImport = parseBool("AutoMatchProfilesOnImport", true)
-    
+    settings.deleteUnused = parseBool("DeleteUnused", false)
+    deleteUnusedMode = settings.deleteUnused and 1 or 0
+
     -- Sync global mode variables
     importMode = settings.importMode
     normalizeMode = settings.normalizeMode
@@ -4531,9 +4534,21 @@ local function drawUI_body()
         
         for i, tr in ipairs(mixTargets) do
             local slots = map[i] or {0}
+
+            -- Check if this track has any source mapped
+            local trackHasSource = false
+            for _, ri in ipairs(slots) do
+                if ri and ri > 0 then trackHasSource = true; break end
+            end
+            local dimRow = (deleteUnusedMode == 1) and (not trackHasSource) and (#recSources > 0)
+
             for s = 1, math.max(1, #slots) do
                 globalRowID = globalRowID + 1  -- Increment for each row
                 r.ImGui_TableNextRow(ctx)
+
+                if dimRow then
+                    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), text_muted)
+                end
                 
                 -- Create unique row ID for selection tracking
                 local rowID = string.format("%d_%d", i, s)
@@ -4951,6 +4966,10 @@ local function drawUI_body()
                     end
                 end
                 
+                if dimRow then
+                    r.ImGui_PopStyleColor(ctx, 1)
+                end
+
                 ::nextrow::
             end
         end
@@ -4971,15 +4990,12 @@ local function drawUI_body()
     
     r.ImGui_Separator(ctx)
 
-    -- Options row 1: After commit + Copy media
-    r.ImGui_Text(ctx, "After commit:")
-    r.ImGui_SameLine(ctx)
-    if r.ImGui_RadioButton(ctx, "Keep unused", deleteUnusedMode == 0) then
-        deleteUnusedMode = 0
-    end
-    r.ImGui_SameLine(ctx)
-    if r.ImGui_RadioButton(ctx, "Delete unused", deleteUnusedMode == 1) then
-        deleteUnusedMode = 1
+    -- Options row 1: Delete unused + Copy media
+    local delChanged, delVal = r.ImGui_Checkbox(ctx, "Delete unused", deleteUnusedMode == 1)
+    if delChanged then
+        deleteUnusedMode = delVal and 1 or 0
+        settings.deleteUnused = (deleteUnusedMode == 1)
+        saveIni()
     end
     r.ImGui_SameLine(ctx)
     r.ImGui_Dummy(ctx, 12, 0)

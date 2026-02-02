@@ -25,7 +25,7 @@
 local r = reaper
 
 -- ===== VERSION =====
-local VERSION = "2.2"
+local VERSION = "2.3"
 local WINDOW_TITLE = "RAPID v" .. VERSION
 
 -- ===== Capability checks =====
@@ -4234,13 +4234,13 @@ local function drawUI_body()
     r.ImGui_Dummy(ctx, 8, 0)
     r.ImGui_SameLine(ctx)
 
-    if r.ImGui_Button(ctx, "Auto-match Tracks") then
+    if sec_button("Auto-match Tracks") then
         autosuggest()
     end
 
     if normalizeMode then
         r.ImGui_SameLine(ctx)
-        if r.ImGui_Button(ctx, "Auto-match Profiles") then
+        if sec_button("Auto-match Profiles") then
             autoMatchProfiles()
         end
     end

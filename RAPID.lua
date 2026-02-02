@@ -254,6 +254,8 @@ local dragSelectState = nil  -- Drag selection state for Sel column
 local dragLockState = nil    -- Drag state for Lock checkbox
 local dragKeepNameState = nil -- Drag state for Keep Name checkbox
 local dragKeepFXState = nil  -- Drag state for Keep FX checkbox
+local editingDestTrack = nil -- Track pointer currently being renamed (double-click)
+local editingDestBuf = ""    -- Buffer for the InputText
 
 -- Caches
 local hasKids = setmetatable({}, {__mode="k"})
@@ -2423,7 +2425,7 @@ local function fixChunkMediaPaths(chunk, doCopy)
                 finalPath = copyMediaToProject(resolvedPath)
             end
 
-            r.ShowConsoleMsg(string.format("  fixChunk: '%s' -> '%s'\n", oldPath, finalPath))
+            log(string.format("  fixChunk: '%s' -> '%s'\n", oldPath, finalPath))
 
             if finalPath ~= oldPath then
                 local escapedOld = oldPath:gsub("([%.%-%+%*%?%[%]%(%)%^%$%%])", "%%%1")
@@ -2441,7 +2443,7 @@ local function fixChunkMediaPaths(chunk, doCopy)
                 end
             end
         else
-            r.ShowConsoleMsg(string.format("  fixChunk UNRESOLVED: '%s'\n", oldPath))
+            log(string.format("  fixChunk UNRESOLVED: '%s'\n", oldPath))
         end
     end
 
@@ -2453,7 +2455,7 @@ local function postprocessTrackCopyRelink(track, doCopy)
     if not track or not r.ValidatePtr(track, "MediaTrack*") then return end
 
     local item_cnt = r.CountTrackMediaItems(track)
-    r.ShowConsoleMsg(string.format("postprocessRelink: %d items, doCopy=%s\n", item_cnt, tostring(doCopy)))
+    log(string.format("postprocessRelink: %d items, doCopy=%s\n", item_cnt, tostring(doCopy)))
 
     for i = 0, item_cnt - 1 do
         local item = r.GetTrackMediaItem(track, i)
@@ -2465,7 +2467,7 @@ local function postprocessTrackCopyRelink(track, doCopy)
                     local src = r.GetMediaItemTake_Source(take)
                     if src then
                         local _, cur = r.GetMediaSourceFileName(src, "")
-                        r.ShowConsoleMsg(string.format("  take %d: src='%s' exists=%s\n", t, cur or "nil", tostring(fileExists(cur or ""))))
+                        log(string.format("  take %d: src='%s' exists=%s\n", t, cur or "nil", tostring(fileExists(cur or ""))))
                         if cur and #cur > 0 then
                             if doCopy then
                                 local newPath = copyMediaToProject(cur)
@@ -2817,24 +2819,7 @@ local function replaceMixWithSourceAtSamePosition(entry, mixTr)
         end
         
         local chunk = sanitizeChunk(entry.chunk)
-
-        -- DEBUG: show FILE lines before fix
-        for line in chunk:gmatch("[^\n]+") do
-            if line:match("^%s*FILE%s+") then
-                r.ShowConsoleMsg("BEFORE fixChunk FILE: " .. line .. "\n")
-            end
-        end
-        r.ShowConsoleMsg("recPathRPPDir = " .. tostring(recPathRPPDir) .. "\n")
-        r.ShowConsoleMsg("copyMediaOnCommit = " .. tostring(copyMediaOnCommit) .. "\n")
-
         chunk = fixChunkMediaPaths(chunk, copyMediaOnCommit)
-
-        -- DEBUG: show FILE lines after fix
-        for line in chunk:gmatch("[^\n]+") do
-            if line:match("^%s*FILE%s+") then
-                r.ShowConsoleMsg("AFTER fixChunk FILE: " .. line .. "\n")
-            end
-        end
 
         -- CRITICAL: Add POOLEDENV data to track chunk if this track has automation items
         if entry.pooledEnvs and #entry.pooledEnvs > 0 then
@@ -4648,8 +4633,40 @@ local function drawUI_body()
                 -- Column 2: Template Destination (Track Name)
                 r.ImGui_TableSetColumnIndex(ctx, 2)
                 if s == 1 then
-                    r.ImGui_Text(ctx, name .. (isLeafCached(tr) and "" or " (Folder)"))
-                    if r.ImGui_IsItemHovered(ctx) then r.ImGui_SetTooltip(ctx, name) end
+                    if editingDestTrack == tr then
+                        -- Editing mode: InputText
+                        r.ImGui_SetNextItemWidth(ctx, -1)
+                        local changed, newBuf = r.ImGui_InputText(ctx, "##destName_" .. globalRowID, editingDestBuf, r.ImGui_InputTextFlags_EnterReturnsTrue() | r.ImGui_InputTextFlags_AutoSelectAll())
+                        editingDestBuf = newBuf
+                        -- Auto-focus on first frame
+                        if not r.ImGui_IsItemActive(ctx) and not r.ImGui_IsItemDeactivated(ctx) then
+                            r.ImGui_SetKeyboardFocusHere(ctx, -1)
+                        end
+                        if changed then
+                            -- Enter pressed: apply rename
+                            local trimmed = (editingDestBuf or ""):gsub("^%s+", ""):gsub("%s+$", "")
+                            if trimmed ~= "" then
+                                r.GetSetMediaTrackInfo_String(tr, "P_NAME", trimmed, true)
+                                nameCache[tr] = trimmed
+                            end
+                            editingDestTrack = nil
+                            editingDestBuf = ""
+                        elseif r.ImGui_IsItemDeactivated(ctx) then
+                            -- Lost focus / Escape: cancel
+                            editingDestTrack = nil
+                            editingDestBuf = ""
+                        end
+                    else
+                        -- Display mode: Text, double-click to edit
+                        r.ImGui_Text(ctx, name .. (isLeafCached(tr) and "" or " (Folder)"))
+                        if r.ImGui_IsItemHovered(ctx) then
+                            r.ImGui_SetTooltip(ctx, name)
+                        end
+                        if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseDoubleClicked(ctx, r.ImGui_MouseButton_Left()) then
+                            editingDestTrack = tr
+                            editingDestBuf = name
+                        end
+                    end
                 else
                     r.ImGui_Text(ctx, "|_")
                 end

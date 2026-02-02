@@ -5668,45 +5668,45 @@ local function drawHelpWindow()
             -- ===== TAB: OVERVIEW =====
             if r.ImGui_BeginTabItem(ctx, "Overview") then
                 r.ImGui_TextWrapped(ctx, [[
-RAPID v2.1 - Recording Auto-Placement & Intelligent Dynamics
+RAPID v2.3 - Recording Auto-Placement & Intelligent Dynamics
 
-A professional workflow tool for REAPER that combines automated track 
+A professional workflow tool for REAPER that combines automated track
 mapping with intelligent LUFS-based normalization.
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 THREE WORKFLOWS IN ONE:
 
 1. IMPORT MODE
-   Ã¢â€ â€™ Map recording tracks to your mix template
-   Ã¢â€ â€™ Preserves all FX, sends, routing, automation
-   Ã¢â€ â€™ Perfect for recurring workflows (podcasts, live recordings, etc.)
+   -> Map recording tracks to your mix template
+   -> Preserves all FX, sends, routing, automation
+   -> Perfect for recurring workflows (podcasts, live recordings, etc.)
 
-2. NORMALIZE MODE  
-   Ã¢â€ â€™ Standalone LUFS normalization for existing tracks
-   Ã¢â€ â€™ No import needed - works on current project
-   Ã¢â€ â€™ Quick loudness standardization
+2. NORMALIZE MODE
+   -> Standalone LUFS normalization for existing tracks
+   -> No import needed - works on current project
+   -> Quick loudness standardization
 
 3. IMPORT + NORMALIZE (Full Workflow)
-   Ã¢â€ â€™ Complete automation: import, map, and normalize
-   Ã¢â€ â€™ One-click solution for production workflows
-   Ã¢â€ â€™ Professional gain staging in seconds
+   -> Complete automation: import, map, and normalize
+   -> One-click solution for production workflows
+   -> Professional gain staging in seconds
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 MODE SELECTION:
 
 At the top of the window, you'll find two checkboxes:
 
-Ã¢Ëœâ€˜ Import    Ã¢Ëœâ€˜ Normalize  Ã¢â€ â€™  Full RAPID workflow
-Ã¢Ëœâ€˜ Import    Ã¢ËœÂ Normalize  Ã¢â€ â€™  Import & mapping only
-Ã¢ËœÂ Import    Ã¢Ëœâ€˜ Normalize  Ã¢â€ â€™  Normalize-only mode
+[x] Import    [x] Normalize  ->  Full RAPID workflow
+[x] Import    [ ] Normalize  ->  Import & mapping only
+[ ] Import    [x] Normalize  ->  Normalize-only mode
 
 (At least one mode must be active)
 
 Your mode selection is saved and restored automatically.
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 KEY FEATURES:
 
@@ -5725,14 +5725,17 @@ KEY FEATURES:
   - Drag-to-toggle checkboxes (paint mode)
   - Click column headers to toggle all
   - Protected tracks (lock feature)
+  - Double-click to rename template tracks
+  - Hide unused tracks with one click
 
  Professional Tools
   - Process per region (multi-song sessions)
-  - Create on new Fixed Item Lane (A/B comparison)
+  - Import to new Fixed Item Lane (A/B comparison)
   - Delete gaps between regions
   - Copy or keep source FX
+  - Duplicate template slots (+/- buttons)
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 GETTING STARTED:
 
@@ -5742,7 +5745,7 @@ Review "Tips & Tricks" for advanced features.
 
 Version: ]] .. VERSION .. [[
 
-Last Updated: November 2025
+Last Updated: February 2026
 ]])
                 r.ImGui_EndTabItem(ctx)
             end
@@ -5752,7 +5755,7 @@ Last Updated: November 2025
                 r.ImGui_TextWrapped(ctx, [[
 IMPORT MODE - Automated Track Mapping & Template Workflow
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 CONCEPT:
 
@@ -5763,7 +5766,7 @@ RAPID imports recordings from a session and automatically maps them to
 your template tracks, preserving all your template setup while bringing
 in the new audio.
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 STEP-BY-STEP WORKFLOW:
 
@@ -5773,7 +5776,7 @@ STEP-BY-STEP WORKFLOW:
    - Your FX, sends, routing, and automation stay intact
 
 2. LAUNCH RAPID
-   - Enable Import Mode at the top (Ã¢Ëœâ€˜ Import)
+   - Enable Import Mode at the top ([x] Import)
    - Enable Normalize Mode too if you want automatic gain staging
 
 3. IMPORT RECORDINGS
@@ -5792,9 +5795,10 @@ STEP-BY-STEP WORKFLOW:
    - Adjust profiles and target peaks as needed
 
 6. REVIEW MAPPING TABLE
-   - Check all recording Ã¢â€ â€™ template assignments
+   - Check all recording -> template assignments
    - Use multi-select to batch-edit Keep Name/FX settings
    - Lock any tracks you want to protect from deletion
+   - Double-click template names to rename them
 
 7. COMMIT
    - Click "Commit" to execute the mapping
@@ -5803,26 +5807,32 @@ STEP-BY-STEP WORKFLOW:
    - If Normalize Mode is enabled, tracks are normalized
    - Done!
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 MAPPING TABLE FEATURES:
+
+ Color Column
+  - Shows track color from REAPER
+
+ Lock Column (lock icon)
+  - Protect tracks from being deleted after commit
+  - Click header to toggle all
+  - Drag to paint lock status
 
  Sel Column
   - Multi-select rows for batch editing
   - Click header to select/deselect all
   - Drag over checkboxes to paint selection
 
- Lock Column  
-  - Protect tracks from being deleted after commit
-  - Click header to toggle all
-  - Drag to paint lock status
-
  Template Destinations
   - Your mix template tracks (target)
-  - Color swatch shows track color
+  - Double-click to rename a track
+  - Duplicated slots can be renamed independently
 
  Recording Sources
   - Dropdown to select which recording maps to this template track
+  - "+" button to add duplicate slots
+  - "-" button to remove duplicate slots
   - Multiple recordings can map to same template (creates lanes)
 
  Keep Name
@@ -5844,7 +5854,7 @@ MAPPING TABLE FEATURES:
   - Target peak level for normalization
   - Default values from profile, adjustable per track
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 MULTI-SLOT MAPPING:
 
@@ -5852,15 +5862,17 @@ One template track can receive multiple recordings:
 
 Example: "Kick" template track receives:
 - Slot 1: "Kick In" recording
-- Slot 2: "Kick Out" recording  
+- Slot 2: "Kick Out" recording
 - Slot 3: "Kick Sub" recording
 
 Result: Three tracks in your template, all with template FX/routing,
 named "Kick", "Kick (2)", "Kick (3)".
 
-Use the "+" button to add slots, "x" button to remove them.
+Use the "+" button to add slots, "-" button to remove them.
+Duplicate slots inherit normalization settings from the original.
+You can rename duplicate slots independently by double-clicking.
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 AFTER COMMIT OPTIONS:
 
@@ -5868,15 +5880,16 @@ AFTER COMMIT OPTIONS:
   - Copies audio files into project directory
   - Recommended for archival and portability
 
- Keep unused / Delete unused template tracks
-  - Keep: Unmapped template tracks remain in project
-  - Delete: Clean up template tracks that didn't receive recordings
+ Delete unused template tracks
+  - Toggle checkbox to hide/show unused tracks
+  - On commit: unmapped tracks are removed
+  - Locked tracks and folders with content are always kept
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 MARKERS, REGIONS & TEMPO:
 
-Use "Import Markers/Regions/Tempo" button to transfer:
+Use "Import Markers" button to transfer:
 - Markers from recording session
 - Regions with names
 - Tempo map
@@ -5884,7 +5897,7 @@ Use "Import Markers/Regions/Tempo" button to transfer:
 Note: This closes the script to prevent conflicts.
 Reopen RAPID after import completes.
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 TIPS:
 
@@ -5901,7 +5914,7 @@ TIPS:
                 r.ImGui_TextWrapped(ctx, [[
 NORMALIZE MODE - Standalone LUFS Normalization
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 CONCEPT:
 
@@ -5910,7 +5923,7 @@ LUFS-based loudness standardization with instrument-specific profiles.
 
 No importing needed - works directly on your current project tracks.
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 STEP-BY-STEP WORKFLOW:
 
@@ -5919,8 +5932,8 @@ STEP-BY-STEP WORKFLOW:
    - Tracks must contain media items
 
 2. ENABLE NORMALIZE MODE
-   - Disable Import Mode (Ã¢ËœÂ Import)
-   - Enable Normalize Mode (Ã¢Ëœâ€˜ Normalize)
+   - Disable Import Mode ([ ] Import)
+   - Enable Normalize Mode ([x] Normalize)
    - UI switches to Normalize-Only interface
 
 3. LOAD TRACKS
@@ -5931,7 +5944,6 @@ STEP-BY-STEP WORKFLOW:
 4. ASSIGN PROFILES
    - Click "Auto-match Profiles" for automatic assignment
    - OR manually select profiles from dropdowns
-   - OR use "Set all to:" bulk action for quick assignment
 
 5. ADJUST SETTINGS
    - Review target peak levels (default from profile)
@@ -5939,31 +5951,31 @@ STEP-BY-STEP WORKFLOW:
    - Check normalization options (see below)
 
 6. NORMALIZE
-   - Click "Normalize" button
+   - Click "Commit" button
    - Progress shown in REAPER console
    - Done!
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 NORMALIZATION OPTIONS:
 
- Create on new Fixed Item Lane
+ Import to new lane
   - Creates duplicate lane with normalized audio
   - Original stays on first lane (muted)
   - Perfect for A/B comparison
   - Can revert anytime by switching lanes
 
- Process per region
+ Normalize per region
   - Normalizes each region independently
   - Essential for multi-song sessions
   - Each song gets its own loudness target
 
  Delete media between regions
   - Removes audio between regions (gaps)
-  - Only available when "Process per region" is enabled
+  - Only available when "Normalize per region" is enabled
   - Cleans up long recordings with songs separated by regions
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 TRACK TABLE FEATURES:
 
@@ -5987,31 +5999,7 @@ TRACK TABLE FEATURES:
   - Track stays in project, just not normalized
   - Use "Reload Tracks" to add it back
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
-
-BULK ACTIONS:
-
-Use "Set all to:" section for quick batch assignment:
-
-1. Select Profile from dropdown (e.g., "Vocal")
-2. Set Peak dB value (e.g., -10)
-3. Click "Apply to all"
-4. All tracks now have this profile and peak
-
-Useful for uniform processing (all vocals, all drums, etc.)
-
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
-
-INFO BOX:
-
-Shows summary before normalizing:
-- Total tracks loaded
-- How many will be normalized (profile assigned)
-- Regions count (if processing per region)
-
-Example: "12 tracks loaded | Normalizing: 8 tracks x 4 regions"
-
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 USE CASES:
 
@@ -6030,18 +6018,13 @@ USE CASES:
   - Each instrument at appropriate loudness
   - No more huge level differences
 
- Re-normalization
-  - Made edits? Re-normalize quickly
-  - Process only changed tracks
-  - Consistent levels maintained
-
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 TIPS:
 
  Use Auto-match Profiles to save time
- Create new lane for non-destructive normalization
- Process per region essential for live recordings
+ Import to new lane for non-destructive normalization
+ Normalize per region essential for live recordings
  Combine with Import Mode for complete workflow
 ]])
                 r.ImGui_EndTabItem(ctx)
@@ -6052,7 +6035,7 @@ TIPS:
                 r.ImGui_TextWrapped(ctx, [[
 LUFS NORMALIZATION SYSTEM
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 WHAT IS LUFS?
 
@@ -6063,7 +6046,7 @@ peak levels. Used in broadcast, streaming, and professional audio.
 
 RAPID uses LUFS-M max (Momentary Maximum) for normalization.
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 WHY INSTRUMENT-SPECIFIC PROFILES?
 
@@ -6074,7 +6057,7 @@ Different instruments have different dynamic ranges:
   - Lots of headroom between hits
   - Need higher LUFS targets
 
- Sustained instruments (vocals, bass) have LOWER peaks but HIGH LUFS  
+ Sustained instruments (vocals, bass) have LOWER peaks but HIGH LUFS
   - Continuous energy
   - Less dynamic range
   - Need lower LUFS targets
@@ -6082,7 +6065,7 @@ Different instruments have different dynamic ranges:
 If you normalize everything to -23 LUFS, your kick will be way too
 quiet compared to vocals. Profiles solve this.
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 PROFILE SYSTEM:
 
@@ -6100,7 +6083,7 @@ Example: Kick profile
 
 This makes kick loud enough despite high dynamic range.
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 DEFAULT PROFILES:
 
@@ -6153,7 +6136,7 @@ Room (offset: 6, default: -12 dB)
 - Less direct than vocals
 - Target: -18 LUFS
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 MEASUREMENT DETAILS:
 
@@ -6180,7 +6163,7 @@ Example: A 60-second track with 10-second segments
 - Remaining segments sorted
 - 90th percentile value used
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 ADJUSTING SETTINGS:
 
@@ -6201,7 +6184,7 @@ Settings > Normalization tab:
   - Lower = includes more quiet sections
   - Default (-40 LUFS) catches most silence
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 PRACTICAL WORKFLOW:
 
@@ -6221,7 +6204,7 @@ PRACTICAL WORKFLOW:
    - Check relative balance
    - Re-normalize individual tracks if needed
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 CUSTOM PROFILES:
 
@@ -6245,7 +6228,7 @@ Each profile needs:
                 r.ImGui_TextWrapped(ctx, [[
 TIPS & TRICKS - Advanced Features
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 MULTI-SELECT & BATCH EDITING:
 
@@ -6265,7 +6248,7 @@ MULTI-SELECT & BATCH EDITING:
   2. Set one to "Keep name" = ON
   3. All selected rows updated instantly
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 DRAG-TO-TOGGLE (Paint Mode):
 
@@ -6291,27 +6274,42 @@ How it works:
 3. All touched checkboxes get same state
 4. Release mouse button
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 CLICKABLE COLUMN HEADERS:
 
 Click column headers to toggle ALL:
 
- "Sel" Header Ã¢â€ â€™ Select/deselect all rows
- "Lock" Header Ã¢â€ â€™ Lock/unlock all tracks
- "Keep name" Header Ã¢â€ â€™ Toggle all Keep Name
- "Keep FX" Header Ã¢â€ â€™ Toggle all Keep FX
+ "Sel" Header -> Select/deselect all rows
+ Lock Header -> Lock/unlock all tracks
+ "Keep name" Header -> Toggle all Keep Name
+ "Keep FX" Header -> Toggle all Keep FX
 
 Behavior:
-- If ANY are ON Ã¢â€ â€™ ALL turn OFF
-- If ALL are OFF Ã¢â€ â€™ ALL turn ON
+- If ANY are ON -> ALL turn OFF
+- If ALL are OFF -> ALL turn ON
 
 Super fast for:
 - "Lock all my bus tracks"
 - "Keep all recording names"
 - "Reset all to template FX"
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
+
+EDITABLE TEMPLATE NAMES:
+
+Double-click any template track name to rename it:
+
+ Original tracks
+  - Rename changes the actual REAPER track name
+  - Press Enter or click away to confirm
+
+ Duplicate slots (created with "+")
+  - Rename only affects the imported track name
+  - Original REAPER track stays unchanged
+  - Each duplicate can have its own name
+
+--------------------------------------------------------------------
 
 PROTECTED TRACKS (Lock Feature):
 
@@ -6326,14 +6324,15 @@ Use Lock to protect tracks from deletion:
   - Locked tracks skip the commit process
   - Won't be replaced by recordings
   - Stay exactly as they are
+  - Always visible even when "Delete unused" is on
 
  Workflow
   1. Lock your master track
-  2. Lock all bus tracks (click Lock header!)
+  2. Lock all bus tracks (click lock header!)
   3. Lock any reference/guide tracks
   4. Now you can safely commit
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 MULTI-SLOT MAPPING:
 
@@ -6351,6 +6350,10 @@ One template track can receive multiple recordings:
   - "Kick (3)" (third slot)
   All have same FX, routing from template
 
+ Duplicate slots inherit normalization settings
+  - Profile and peak dB copied from original
+  - Can be adjusted independently per slot
+
  When To Use
   - Multi-mic instruments (drums)
   - Multiple takes of same part
@@ -6359,9 +6362,9 @@ One template track can receive multiple recordings:
  How To Add Slots
   - Click "+" button in Recording Sources cell
   - Select recording for each slot
-  - Assign profiles per slot (if normalizing)
+  - Use "-" to remove duplicate slots
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 PROCESS PER REGION:
 
@@ -6373,7 +6376,7 @@ Essential for multi-song sessions:
   Song 1 (ballad) and Song 10 (rock anthem) forced to same level
 
  The Solution
-  Enable "Process per region"
+  Enable "Normalize per region"
   Each region normalized independently
   Each song can have its own dynamic
 
@@ -6384,13 +6387,13 @@ Essential for multi-song sessions:
 
  Workflow
   1. Mark each song as region in recording project
-  2. Import into RAPID with "Process per region" ON
+  2. Import into RAPID with "Normalize per region" ON
   3. Each song gets appropriate loudness
   4. Gaps automatically cleaned
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
-CREATE NEW LANE (A/B Comparison):
+IMPORT TO NEW LANE (A/B Comparison):
 
 Non-destructive normalization:
 
@@ -6406,7 +6409,7 @@ Non-destructive normalization:
   - No destructive edits
 
  How To Use
-  1. Enable "Create on new Fixed Item Lane"
+  1. Enable "Import to new lane"
   2. Normalize
   3. In REAPER: Right-click track > Show all lanes
   4. Toggle lanes on/off to A/B
@@ -6416,18 +6419,18 @@ Non-destructive normalization:
   - Delete the other
   - Or keep both for future reference
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 ALIASES:
 
 Speed up track matching:
 
  Track Aliases
-  "voc, vocal, vox" Ã¢â€ â€™ "Vocals 1"
+  "voc, vocal, vox" -> "Vocals 1"
   Any recording track named voc/vocal/vox maps to "Vocals 1"
 
- Profile Aliases  
-  "vocal, vox, lead" Ã¢â€ â€™ "Vocal" profile
+ Profile Aliases
+  "vocal, vox, lead" -> "Vocal" profile
   Tracks with these names get Vocal profile automatically
 
  Configure
@@ -6438,16 +6441,17 @@ Speed up track matching:
   Source keywords: comma-separated
   Destination: exact match required
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 KEYBOARD SHORTCUTS:
 
 While in mapping table:
- Shift+Click Ã¢â€ â€™ Range selection
- Click+Drag Ã¢â€ â€™ Paint selection/toggle
- Click header Ã¢â€ â€™ Toggle all
+ Shift+Click -> Range selection
+ Click+Drag -> Paint selection/toggle
+ Click header -> Toggle all
+ Double-click template name -> Rename track
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 CONSOLE LOGGING:
 
@@ -6464,7 +6468,7 @@ Shows detailed info:
 
 Check REAPER Console (View > Monitoring) for output.
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 WORKFLOW OPTIMIZATION:
 
@@ -6481,11 +6485,11 @@ WORKFLOW OPTIMIZATION:
   - Export as .RPP or individual files
 
  RAPID Workflow
-  1. Import Ã¢â€ â€™ Auto-match Ã¢â€ â€™ Review Ã¢â€ â€™ Commit
+  1. Import -> Auto-match -> Review -> Commit
   2. For repeating work: Save your settings
   3. Use mode checkboxes to skip steps you don't need
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 COMBINING MODES:
 
@@ -6514,9 +6518,54 @@ Mix and match for your workflow:
                 r.ImGui_TextWrapped(ctx, [[
 VERSION HISTORY
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
-v2.0-dev261125c (November 26, 2025)
+v2.3 (February 2026)
+
+New Features:
+ Editable template track names (double-click to rename)
+ Duplicate slot renaming (independent from original)
+ Duplicate slots inherit normalization settings
+ Delete unused toggle (checkbox replaces radio buttons)
+ Unused tracks hidden when "Delete unused" is active
+ Improved media path resolution for imported RPP files
+ Offline media auto-relinking via progressive path matching
+
+UI Improvements:
+ MixnoteStyle dark theme refinements
+ Separate color swatch and lock columns
+ Lock column header shows lock icon
+ Consistent button styling (sec_button for secondary actions)
+ Right-aligned Commit/Close buttons
+ Renamed options: "Import to new lane", "Normalize per region"
+ Removed obsolete buttons (Reload Mix Targets, Clear list, Show all RPP tracks)
+ Removed bulk action row (use multi-select instead)
+
+Bug Fixes:
+ Fixed duplicate slot deletion losing original assignment
+ Fixed folder visibility in delete unused mode
+ Fixed slot name override on commit for duplicated tracks
+
+--------------------------------------------------------------------
+
+v2.2 (February 2026)
+
+ MixnoteStyle dark theme (26 color + 10 style pushes)
+ Compact UI layout
+ sec_button() helper for secondary actions
+ Visual refinements throughout
+
+--------------------------------------------------------------------
+
+v2.1 (November 2025)
+
+ Auto-duplicate feature for multi-slot mapping
+ "+" and "-" buttons for slot management
+ Per-slot FX settings
+
+--------------------------------------------------------------------
+
+v2.0 (November 2025)
 
 MAJOR UPDATE - Unified Workflow:
  Merged RAPID and standalone normalization into one script
@@ -6531,80 +6580,26 @@ New Features:
  Drag-to-toggle for all checkboxes (paint mode)
  Lock column (protected tracks)
  Multi-select batch editing
- Separate drag states per checkbox type
 
 Code Quality:
  Removed 668 lines of obsolete code
- Streamlined from 8076 total lines to 5900 lines (29% reduction)
+ Streamlined from 8076 to 5900 lines (29% reduction)
  Unified configuration system
- Better separation of concerns
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
-
-v1.5-dev261125b (November 26, 2025)
-
- Multi-select system for batch row editing
- Drag-over-checkboxes selection (REAPER-style)
- Shift+Click range selection
- Separate Lock column with color swatch
- Keep FX per-slot functionality
-
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
-
-v1.5-dev261125 (November 25, 2025)
-
- Keep Source FX checkbox per slot
- Manual Marker/Region/Tempo import button
- Script auto-close after marker import
- Improved UI layout
-
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
-
-v1.5-dev251125 (November 25, 2025)
-
-MAJOR REFACTOR:
- 60% code reduction (~5,096 to ~2,000 lines)
- 10x performance improvement (20s Ã¢â€ â€™ 2s for 20 tracks)
- Complete code reorganization
- Optimized track operations
-
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
-
-v1.5-dev171125 (November 17, 2025)
-
- LUFS Segment Threshold feature
- Filters out quiet segments during measurement
- Prevents silence from affecting normalization
- Default: -40 LUFS threshold
-
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
-
-v1.5-dev161125 (November 16, 2025)
-
- Shared normalization configuration system
- Configurable LUFS settings
- Segment size (5-30s)
- Percentile (80-99%)
- Settings window with tabs
-
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 v1.5 (November 2025)
 
+MAJOR REFACTOR:
+ 60% code reduction (~5,096 to ~2,000 lines)
+ 10x performance improvement (20s -> 2s for 20 tracks)
+ Complete code reorganization
  Fixed FX copying using native API (TrackFX_CopyToTrack)
- Reverted from chunk-based approach
- Reliable FX chain copying
- No bracket escaping issues
+ LUFS Segment Threshold feature
+ Shared normalization configuration system
+ Settings window with tabs
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
-
-v1.4 (November 2025)
-
- FAILED: Chunk-based FX copying approach
- Nested bracket issues
- Reverted in v1.5
-
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 v1.3 (October 2025)
 
@@ -6613,7 +6608,7 @@ v1.3 (October 2025)
  Instrument-specific LUFS offsets
  Profile aliases
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 v1.2 (October 2025)
 
@@ -6622,7 +6617,7 @@ v1.2 (October 2025)
  Percentile filtering
  Integration with track mapping
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 v1.1 (September 2025)
 
@@ -6632,7 +6627,7 @@ v1.1 (September 2025)
  Track aliases
  Template workflow
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 CREDITS:
 
@@ -6643,16 +6638,17 @@ SWS Extension integration
 
 Special thanks to the REAPER community for feedback and testing.
 
-ÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂÂ
+--------------------------------------------------------------------
 
 Current Version: ]] .. VERSION .. [[
 
-Last Updated: November 2025
+Last Updated: February 2026
 
 For support or feature requests, check the REAPER forums.
 ]])
                 r.ImGui_EndTabItem(ctx)
             end
+
             
             r.ImGui_EndTabBar(ctx)
         end

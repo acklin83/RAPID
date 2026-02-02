@@ -4,6 +4,44 @@ Version history for RAPID.
 
 ---
 
+## v2.3 (February 2026)
+
+**New Features:**
+- Editable template track names (double-click to rename)
+- Duplicate slot renaming (independent from original track)
+- Duplicate slots inherit normalization settings automatically
+- Delete unused toggle (single checkbox replaces radio buttons)
+- Unused tracks hidden when "Delete unused" is active
+- Improved media path resolution for imported RPP files
+- Offline media auto-relinking via progressive path suffix matching
+
+**UI Improvements:**
+- MixnoteStyle dark theme refinements
+- Separate color swatch and lock columns with lock icon header
+- Consistent button styling (sec_button for all secondary actions)
+- Right-aligned Commit/Close buttons
+- Renamed options: "Import to new lane", "Normalize per region"
+- Removed obsolete buttons (Reload Mix Targets, Clear list, Show all RPP tracks)
+- Removed bulk action row (use multi-select instead)
+- Rewritten help text (removed broken characters, documented all v2.3 features)
+
+**Bug Fixes:**
+- Fixed offline media items when importing RPP tracks from different locations
+- Fixed duplicate slot deletion losing original track assignment
+- Fixed folder visibility logic in delete unused mode
+- Fixed slot name override on commit for duplicated tracks
+
+---
+
+## v2.2 (February 2026)
+
+- MixnoteStyle dark theme (26 color + 10 style variable pushes)
+- Compact UI layout
+- sec_button() helper for secondary action buttons
+- Visual refinements throughout
+
+---
+
 ## v2.1 (November 27, 2025)
 
 **Auto-Duplicate Feature:**

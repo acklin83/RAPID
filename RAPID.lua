@@ -3410,8 +3410,7 @@ local function normalizeTrack(track, normalizationType, targetValue, regions, ta
     -- Activate the new lane
     log(string.format("  Activating lane %d\n", targetLane))
     setOnlyLaneActive(track, targetLane)
-    r.UpdateArrange()
-    
+
     -- Verify lane is active
     local laneActive = r.GetMediaTrackInfo_Value(track, "C_LANEPLAYS:" .. targetLane)
     log(string.format("  Lane %d active status: %d\n", targetLane, laneActive))
@@ -3516,14 +3515,12 @@ local function normalizeTrack(track, normalizationType, targetValue, regions, ta
             log(string.format("  Processed %d gaps between regions\n", #gaps))
         end
         
-        r.UpdateArrange()
     end
-    
+
     -- Make sure new lane is STILL active at the very end
     log("  Final lane activation\n")
     setOnlyLaneActive(track, targetLane)
-    r.UpdateArrange()
-    
+
     return true
 end
 
@@ -3663,6 +3660,11 @@ local function normalizeTrackDirect(track, normalizationType, targetValue, regio
 end
 
 -- ===== COMMIT MAPPINGS =====
+-- Performance notes (v2.3.1):
+--   - firstNew chunk cached once before duplicate loop (avoids repeated GetTrackStateChunk)
+--   - UpdateArrange() removed from normalization inner loops (already inside PreventUIRefresh)
+--   - Peak building and media sweep scoped to allCreatedTracks only
+--   - Normalization lookup pre-computed once via trackNormLookup table
 local function commitMappings()
     _G.__mr_offset = 0.0
     
@@ -3670,6 +3672,7 @@ local function commitMappings()
     r.PreventUIRefresh(1)
     
     local ops, matchedSet = {}, {}
+    local allCreatedTracks = {}  -- collect all new tracks for targeted peak building
     
     for i, mixTr in ipairs(mixTargets) do
         if validTrack(mixTr) then
@@ -3736,6 +3739,12 @@ local function commitMappings()
         r.DeleteTrack(mixTr)
         matchedSet[mixTr] = true
         
+        -- Cache firstNew chunk once for all duplicates (avoid repeated expensive serialization)
+        local firstNewChunk = nil
+        if validTrack(firstNew) then
+            _, firstNewChunk = r.GetTrackStateChunk(firstNew, "", false)
+        end
+
         for s = 2, #op.recIdxs do
             local prev = created[#created]
             local insertIdx = prev and (idxOf(prev) + 1) or r.CountTracks(0)
@@ -3761,9 +3770,8 @@ local function commitMappings()
             if entry and entry.src == "file" then
                 newTr = createTrackWithAudioFileAtIndex(insertIdx, 0, entry.file, slotName)
                 -- Set groups from firstNew on file import duplicates
-                if validTrack(newTr) and validTrack(firstNew) then
-                    local _, firstChunk = r.GetTrackStateChunk(firstNew, "", false)
-                    local firstGroupFlags = firstChunk:match("(GROUP_FLAGS[^\r\n]*)")
+                if validTrack(newTr) and firstNewChunk then
+                    local firstGroupFlags = firstNewChunk:match("(GROUP_FLAGS[^\r\n]*)")
                     if firstGroupFlags then
                         local _, newChunk = r.GetTrackStateChunk(newTr, "", false)
                         newChunk = replaceGroupFlagsInChunk(newChunk, firstGroupFlags)
@@ -3775,10 +3783,9 @@ local function commitMappings()
                 local chunk = sanitizeChunk(entry.chunk)
                 chunk = fixChunkMediaPaths(chunk, copyMediaOnCommit)
                 
-                -- Replace GROUP_FLAGS in chunk with groups from firstNew
-                if validTrack(firstNew) then
-                    local _, firstChunk = r.GetTrackStateChunk(firstNew, "", false)
-                    local firstGroupFlags = firstChunk:match("(GROUP_FLAGS[^\r\n]*)")
+                -- Replace GROUP_FLAGS in chunk with groups from firstNew (using cached chunk)
+                if firstNewChunk then
+                    local firstGroupFlags = firstNewChunk:match("(GROUP_FLAGS[^\r\n]*)")
                     if firstGroupFlags then
                         chunk = replaceGroupFlagsInChunk(chunk, firstGroupFlags)
                         log(">>> Duplicate rpp import: replaced groups from firstNew\n")
@@ -3813,9 +3820,14 @@ local function commitMappings()
             end
         end
         
+        -- Collect created tracks for targeted peak building
+        for _, tr in ipairs(created) do
+            allCreatedTracks[#allCreatedTracks + 1] = tr
+        end
+
         ::continue::
     end
-    
+
     -- Delete unused tracks
     if deleteUnusedMode == 1 then
         local sel = {}
@@ -3852,7 +3864,40 @@ local function commitMappings()
     r.UpdateArrange()
     
     if copyMediaOnCommit then
-        sweepProjectCopyRelink(true)
+        -- Sweep only newly created tracks instead of entire project
+        local media_dir = getProjectMediaDir()
+        for _, tr in ipairs(allCreatedTracks) do
+            if validTrack(tr) then
+                local itemCount = r.CountTrackMediaItems(tr)
+                for ii = 0, itemCount - 1 do
+                    local item = r.GetTrackMediaItem(tr, ii)
+                    local take_cnt = r.CountTakes(item)
+                    for t = 0, take_cnt - 1 do
+                        local take = r.GetTake(item, t)
+                        if take then
+                            local src = r.GetMediaItemTake_Source(take)
+                            if src then
+                                local _, cur = r.GetMediaSourceFileName(src, "")
+                                if cur and #cur > 0 then
+                                    local basename = getBasename(cur)
+                                    local destPath = joinPath(media_dir, basename)
+                                    if normalizePath(cur) ~= normalizePath(destPath) then
+                                        if fileExists(cur) then
+                                            if copyFile(cur, destPath) then
+                                                local newSrc = r.PCM_Source_CreateFromFile(destPath)
+                                                if newSrc then
+                                                    r.SetMediaItemTake_Source(take, newSrc)
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
     end
     
     -- Phase 2: Normalize (if enabled)
@@ -3881,55 +3926,51 @@ local function commitMappings()
         end
         
         log(string.format("Current tracks: %d\n", #currentTracks))
-        
+
         -- Table to store target lane per track (for createNewLane mode)
         local trackLanes = {}
-        
-        -- NEW: If createNewLane is enabled, duplicate lanes for tracks that will be normalized
-        if settings.createNewLane then
-            log("\n=== Duplicating lanes for normalized tracks ===\n")
-            
-            -- Build list of tracks that will actually be normalized
-            local tracksToNormalize = {}
-            for idx, tr in ipairs(currentTracks) do
-                local trackName = trName(tr)
-                local normData = nil
-                local wasMapping = false
-                
-                -- Check if track was mapped and has a profile
-                for i, mixTr in ipairs(mixTargets) do
-                    local mixName = nameCache[mixTr] or trName(mixTr)
-                    
-                    local isMatch = false
-                    if trackName == mixName then
+
+        -- Pre-compute normalization lookup: track -> normData (avoids duplicate O(N*M) matching)
+        local trackNormLookup = {}  -- tr -> normData
+        for idx, tr in ipairs(currentTracks) do
+            local trackName = trName(tr)
+            for i, mixTr in ipairs(mixTargets) do
+                local mixName = nameCache[mixTr] or trName(mixTr)
+                local isMatch = false
+                if trackName == mixName then
+                    isMatch = true
+                else
+                    local baseName = trackName:match("^(.-)%s*%(%d+%)$")
+                    if baseName and baseName == mixName then
                         isMatch = true
-                    else
-                        local baseName = trackName:match("^(.-)%s*%(%d+%)$")
-                        if baseName and baseName == mixName then
-                            isMatch = true
-                        end
                     end
-                    
-                    if isMatch and normMap[i] and normMap[i][1] then
-                        local hasMapping = false
-                        local slots = map[i] or {0}
-                        for _, ri in ipairs(slots) do
-                            if ri and ri > 0 then
-                                hasMapping = true
-                                break
-                            end
-                        end
-                        
-                        if hasMapping then
-                            normData = normMap[i][1]
-                            wasMapping = true
+                end
+                if isMatch and normMap[i] and normMap[i][1] then
+                    local hasMapping = false
+                    local slots = map[i] or {0}
+                    for _, ri in ipairs(slots) do
+                        if ri and ri > 0 then
+                            hasMapping = true
                             break
                         end
                     end
+                    if hasMapping then
+                        trackNormLookup[tr] = normMap[i][1]
+                        break
+                    end
                 end
-                
-                -- Add to list if it has a valid profile and was mapped
-                if normData and normData.profile ~= "-" and wasMapping then
+            end
+        end
+
+        -- NEW: If createNewLane is enabled, duplicate lanes for tracks that will be normalized
+        if settings.createNewLane then
+            log("\n=== Duplicating lanes for normalized tracks ===\n")
+
+            -- Build list of tracks that will actually be normalized
+            local tracksToNormalize = {}
+            for idx, tr in ipairs(currentTracks) do
+                local normData = trackNormLookup[tr]
+                if normData and normData.profile ~= "-" then
                     local itemCount = r.CountTrackMediaItems(tr)
                     if itemCount > 0 then
                         tracksToNormalize[#tracksToNormalize + 1] = tr
@@ -3949,17 +3990,14 @@ local function commitMappings()
                 
                 -- Set selected tracks to Fixed Item Lane mode
                 r.Main_OnCommand(42431, 0)
-                r.UpdateArrange()
                 log("  Set selected tracks to Fixed Item Lane mode\n")
-                
+
                 -- Duplicate active lanes to new lanes (works on selected tracks)
                 r.Main_OnCommand(42505, 0)
-                r.UpdateArrange()
                 log("  Duplicated active lanes to new lanes\n")
-                
+
                 -- Switch to next lane (the new duplicated one) - works on selected tracks
                 r.Main_OnCommand(42482, 0)
-                r.UpdateArrange()
                 log("  Switched to play only next lane (new duplicated lane)\n")
                 
                 -- Store the highest lane for each track
@@ -3979,7 +4017,6 @@ local function commitMappings()
                 
                 r.Main_OnCommand(40297, 0) -- Unselect all tracks
                 r.Main_OnCommand(40289, 0) -- Unselect all items
-                r.UpdateArrange()
                 log("  Lane duplication complete\n")
             end
         end
@@ -3988,47 +4025,9 @@ local function commitMappings()
         local normalizedCount = 0
         for idx, tr in ipairs(currentTracks) do
             local trackName = trName(tr)
-            
-            -- Find if this track was mapped and has a norm profile
-            local normData = nil
-            local wasMapping = false
-            
-            for i, mixTr in ipairs(mixTargets) do
-                local mixName = nameCache[mixTr] or trName(mixTr)
-                
-                -- Check if this track name matches (exact OR with " (2)", " (3)" suffix)
-                local isMatch = false
-                if trackName == mixName then
-                    isMatch = true
-                else
-                    -- Check if trackName starts with mixName and ends with " (N)"
-                    local baseName = trackName:match("^(.-)%s*%(%d+%)$")
-                    if baseName and baseName == mixName then
-                        isMatch = true
-                    end
-                end
-                
-                if isMatch and normMap[i] and normMap[i][1] then
-                    -- Use slot 1 profile for the track (primary slot)
-                    -- Also check if this track was actually mapped (has recording source)
-                    local hasMapping = false
-                    local slots = map[i] or {0}
-                    for _, ri in ipairs(slots) do
-                        if ri and ri > 0 then
-                            hasMapping = true
-                            break
-                        end
-                    end
-                    
-                    if hasMapping then
-                        normData = normMap[i][1]  -- Use slot 1 profile
-                        wasMapping = true
-                        break
-                    end
-                end
-            end
-            
-            if normData and normData.profile ~= "-" and wasMapping then
+            local normData = trackNormLookup[tr]
+
+            if normData and normData.profile ~= "-" then
                 -- Check if it's a special Peak/RMS profile or a regular LUFS profile
                 local normType, targetValue
                 
@@ -4105,22 +4104,27 @@ local function commitMappings()
         r.PreventUIRefresh(-1)
         r.TrackList_AdjustWindows(false)
     end
-    
+
     r.UpdateArrange()
     r.UpdateTimeline()
-    
-    -- Generate peaks
-    for i = 0, r.CountMediaItems(0) - 1 do
-        local item = r.GetMediaItem(0, i)
-        local take = r.GetActiveTake(item)
-        if take then
-            local src = r.GetMediaItemTake_Source(take)
-            if src then
-                r.PCM_Source_BuildPeaks(src, 0)
+
+    -- Generate peaks (only for newly created tracks, not entire project)
+    for _, tr in ipairs(allCreatedTracks) do
+        if validTrack(tr) then
+            local itemCount = r.CountTrackMediaItems(tr)
+            for i = 0, itemCount - 1 do
+                local item = r.GetTrackMediaItem(tr, i)
+                local take = r.GetActiveTake(item)
+                if take then
+                    local src = r.GetMediaItemTake_Source(take)
+                    if src then
+                        r.PCM_Source_BuildPeaks(src, 0)
+                    end
+                end
             end
         end
     end
-    
+
     -- Hide fixed item lanes (Command 42432: Toggle fixed item lanes)
     if normalizeMode and settings.createNewLane then
         local lanesVisible = r.GetToggleCommandState(42432) == 1
@@ -4131,10 +4135,12 @@ local function commitMappings()
     end
     
     -- Minimize all tracks
+    r.PreventUIRefresh(1)
     for i = 0, r.CountTracks(0) - 1 do
         local tr = r.GetTrack(0, i)
         r.SetMediaTrackInfo_Value(tr, "I_HEIGHTOVERRIDE", 26)
     end
+    r.PreventUIRefresh(-1)
     r.TrackList_AdjustWindows(false)
     
     r.Undo_EndBlock("RAPID v" .. VERSION .. ": Commit", -1)

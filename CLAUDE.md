@@ -91,6 +91,7 @@
 - SWS functions are also global (e.g., `reaper.CF_GetSWSVersion()`)
 - Chunk-based FX copying was tried and reverted (v1.4) — use native API (`TrackFX_CopyToTrack`)
 - Performance-critical: track operations were optimized from 20s → 2s (v1.5 refactor)
+- Import pipeline (`commitMappings()`) optimized in v2.3.1: cached chunk serialization, removed redundant `UpdateArrange()` calls, targeted peak building and media sweep to new tracks only, pre-computed normalization lookup
 
 ## Resolved Issues
 
@@ -112,6 +113,7 @@
 - v2.1 (Nov 2025): Auto-duplicate feature for multi-slot mapping
 - v2.2 (Feb 2026): MixnoteStyle dark theme, compact UI layout, sec_button helper
 - v2.3 (Feb 2026): Editable track names, duplicate slot improvements, delete unused toggle, offline media fix, DrawList lock icon, help text rewrite
+- v2.3.1 (Feb 2026): Import speed optimization — cached chunks, removed redundant UI updates, targeted peak/media operations, deduplicated norm lookup
 
 ## Files
 

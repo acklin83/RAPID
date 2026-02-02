@@ -1,4 +1,35 @@
-# RAPID Roadmap — UI Redesign (MixnoteStyle)
+# RAPID Roadmap
+
+---
+
+## Priority 0: Import Speed Optimization
+
+Optimize the `commitMappings()` import pipeline for faster execution, especially with many tracks/duplicates.
+
+### 0.1 Cache GetTrackStateChunk in duplicate loop (HIGH impact)
+- [ ] Cache `firstNew` chunk once before the per-duplicate loop instead of calling `GetTrackStateChunk` twice per duplicate
+- [ ] Eliminates ~2×(N-1) expensive chunk serializations per mapped track
+
+### 0.2 Remove redundant UpdateArrange() in normalization (HIGH impact)
+- [ ] Remove ~7 `UpdateArrange()` calls inside per-track normalization loops
+- [ ] Already inside `PreventUIRefresh(1)` — keep only the final call after commit
+
+### 0.3 Wrap minimize-all-tracks in PreventUIRefresh (easy win)
+- [ ] Post-commit track height minimization loop runs after `PreventUIRefresh(-1)` — wrap it in its own block
+
+### 0.4 Targeted peak building (MODERATE effort)
+- [ ] Collect newly-created items during Phase 1 and only call `PCM_Source_BuildPeaks` on those
+- [ ] Avoids iterating every item in the entire project
+
+### 0.5 Deduplicate normalization lookup (MODERATE effort)
+- [ ] Build a track→normalization lookup table once instead of running two identical O(N×M) nested loops
+
+### 0.6 Scope sweepProjectCopyRelink to new tracks only (MODERATE effort)
+- [ ] Limit media sweep to newly-created tracks instead of all project items
+
+---
+
+# UI Redesign (MixnoteStyle)
 
 Redesign of RAPID's UI based on the Mixnote ReaImGui Style Guide (`MixnoteStyle.md`).
 

@@ -4249,61 +4249,11 @@ local function drawUI_body()
     r.ImGui_Dummy(ctx, 8, 0)
     r.ImGui_SameLine(ctx)
 
-    if sec_button("Reload Mix Targets") then
-        rebuildMixTargets()
-        applyLastMap()
-        r.TrackList_AdjustWindows(false)
-        r.UpdateArrange()
-    end
-
-    r.ImGui_SameLine(ctx)
     if sec_button("Import Markers") then
         if recPathRPP and recPathRPP ~= "" then
             importMarkersTempoPostCommit()
         else
             r.ShowMessageBox("Please load a Recording .RPP first.", "No RPP Loaded", 0)
-        end
-    end
-
-    r.ImGui_SameLine(ctx)
-    if sec_button("Clear list") then
-        clearRecList()
-        map = {}
-        for i = 1, #mixTargets do map[i] = {0} end
-    end
-
-    r.ImGui_SameLine(ctx)
-    if sec_button(ONLY_WITH_MEDIA and "Show all RPP tracks" or "Only RPP w/ media") then
-        ONLY_WITH_MEDIA = not ONLY_WITH_MEDIA
-        if recPathRPP then
-            local mapByName = {}
-            for i, tr in ipairs(mixTargets) do
-                local mixName = nameCache[tr] or trName(tr)
-                if map[i] and map[i][1] > 0 then
-                    mapByName[mixName] = recSources[map[i][1]].name
-                end
-            end
-
-            local keepFiles = {}
-            for _, e in ipairs(recSources) do
-                if e.src == "file" then keepFiles[#keepFiles + 1] = e end
-            end
-
-            recSources = keepFiles
-            loadRecRPP(recPathRPP)
-
-            for i, tr in ipairs(mixTargets) do
-                local mixName = nameCache[tr] or trName(tr)
-                if mapByName[mixName] then
-                    for j, rc in ipairs(recSources) do
-                        if trimLower(rc.name) == trimLower(mapByName[mixName]) then
-                            map[i] = {j}
-                            break
-                        end
-                    end
-                end
-            end
-            applyLastMap()
         end
     end
 
@@ -4315,63 +4265,6 @@ local function drawUI_body()
 
     r.ImGui_Separator(ctx)
     
-    -- Bulk action section (only show if normalize mode is enabled)
-    if normalizeMode then
-        if r.ImGui_BeginChild(ctx, "bulk", 0, 40, r.ImGui_WindowFlags_None()) then
-            r.ImGui_Text(ctx, "Set all to:")
-            r.ImGui_SameLine(ctx)
-            
-            -- Build profile list
-            local allProfiles = {"-"}
-            for _, p in ipairs(normProfiles) do
-                allProfiles[#allProfiles + 1] = p.name
-            end
-            
-            r.ImGui_SetNextItemWidth(ctx, 150)
-            local bulkProfile = settings.lastBulkProfile or "-"
-            
-            if r.ImGui_BeginCombo(ctx, "##bulk_profile", bulkProfile) then
-                for _, profileName in ipairs(allProfiles) do
-                    if r.ImGui_Selectable(ctx, profileName, bulkProfile == profileName) then
-                        bulkProfile = profileName
-                        settings.lastBulkProfile = bulkProfile
-                        
-                        if profileName ~= "-" then
-                            local profile = getProfileByName(profileName)
-                            if profile and profile.defaultPeak then
-                                settings.lastBulkPeak = profile.defaultPeak
-                            end
-                        end
-                    end
-                end
-                r.ImGui_EndCombo(ctx)
-            end
-            
-            r.ImGui_SameLine(ctx)
-            r.ImGui_SetNextItemWidth(ctx, 80)
-            local bulkPeak = settings.lastBulkPeak or -6
-            local changed, val = r.ImGui_InputInt(ctx, "##bulk_peak", bulkPeak)
-            if changed then
-                bulkPeak = val
-                settings.lastBulkPeak = bulkPeak
-            end
-            
-            r.ImGui_SameLine(ctx)
-            r.ImGui_Text(ctx, "dB")
-            
-            r.ImGui_SameLine(ctx)
-            if r.ImGui_Button(ctx, "Apply to all") then
-                for i = 1, #mixTargets do
-                    normMap[i] = normMap[i] or {}
-                    local slots = map[i] or {0}
-                    for s = 1, #slots do
-                        normMap[i][s] = {profile = bulkProfile, targetPeak = bulkPeak}
-                    end
-                end
-            end
-        end
-        r.ImGui_EndChild(ctx)
-    end
     
     -- Calculate available height for scrollable table
     local window_h = r.ImGui_GetWindowHeight(ctx)
@@ -4383,13 +4276,14 @@ local function drawUI_body()
                   r.ImGui_TableFlags_Resizable() | r.ImGui_TableFlags_ScrollY()
     
     -- Dynamic column count based on auto-normalize setting
-    -- Columns: [Sel] [Lock/Color] [Template Destinations] [Rec Sources] [Keep name] [Keep FX] [Normalize?] [Peak?] [x]
-    local numColumns = normalizeMode and 9 or 7
-    
+    -- Columns: [Sel] [Color] [Lock] [Template Destinations] [Rec Sources] [Keep name] [Keep FX] [Normalize?] [Peak?] [x]
+    local numColumns = normalizeMode and 10 or 8
+
     if r.ImGui_BeginTable(ctx, "maptable", numColumns, flags, 0, table_height) then
         local COLFIX = r.ImGui_TableColumnFlags_WidthFixed()
-        r.ImGui_TableSetupColumn(ctx, "Sel", COLFIX, 25.0)  -- Select column (35 -> 25)
-        r.ImGui_TableSetupColumn(ctx, "Lock", COLFIX, 40.0)  -- Lock/Color column (30 -> 40)
+        r.ImGui_TableSetupColumn(ctx, "Sel", COLFIX, 25.0)
+        r.ImGui_TableSetupColumn(ctx, "##color", COLFIX, 18.0)  -- Color swatch (no title)
+        r.ImGui_TableSetupColumn(ctx, "\xF0\x9F\x94\x92", COLFIX, 25.0)  -- Lock column (🔒)
         r.ImGui_TableSetupColumn(ctx, "Template Destinations")  -- Mix tracks
         r.ImGui_TableSetupColumn(ctx, "Recording Sources")
         r.ImGui_TableSetupColumn(ctx, "Keep name", COLFIX, 80.0)
@@ -4438,9 +4332,12 @@ local function drawUI_body()
             end
         end
         
-        -- Column 1: Lock (clickable to toggle all protected)
+        -- Column 1: Color swatch (no header)
         r.ImGui_TableSetColumnIndex(ctx, 1)
-        if r.ImGui_Selectable(ctx, "Lock##header", false) then
+
+        -- Column 2: Lock (clickable to toggle all protected)
+        r.ImGui_TableSetColumnIndex(ctx, 2)
+        if r.ImGui_Selectable(ctx, "\xF0\x9F\x94\x92##header", false) then
             -- Check if any tracks are protected
             local anyProtected = false
             for i, tr in ipairs(mixTargets) do
@@ -4460,16 +4357,16 @@ local function drawUI_body()
             saveProtected()
         end
         
-        -- Column 2: Template Destinations
-        r.ImGui_TableSetColumnIndex(ctx, 2)
-        r.ImGui_Text(ctx, "Template Destinations")
-        
-        -- Column 3: Recording Sources
+        -- Column 3: Template Destinations
         r.ImGui_TableSetColumnIndex(ctx, 3)
-        r.ImGui_Text(ctx, "Recording Sources")
-        
-        -- Column 4: Keep Name (clickable to toggle all)
+        r.ImGui_Text(ctx, "Template Destinations")
+
+        -- Column 4: Recording Sources
         r.ImGui_TableSetColumnIndex(ctx, 4)
+        r.ImGui_Text(ctx, "Recording Sources")
+
+        -- Column 5: Keep Name (clickable to toggle all)
+        r.ImGui_TableSetColumnIndex(ctx, 5)
         if r.ImGui_Selectable(ctx, "Keep name##header", false) then
             -- Check if any Keep Name are checked (check keepMap per slot)
             local anyChecked = false
@@ -4495,8 +4392,8 @@ local function drawUI_body()
             end
         end
         
-        -- Column 5: Keep FX (clickable to toggle all)
-        r.ImGui_TableSetColumnIndex(ctx, 5)
+        -- Column 6: Keep FX (clickable to toggle all)
+        r.ImGui_TableSetColumnIndex(ctx, 6)
         if r.ImGui_Selectable(ctx, "Keep FX##header", false) then
             local anyChecked = false
             for i, tr in ipairs(mixTargets) do
@@ -4522,13 +4419,13 @@ local function drawUI_body()
         
         -- Remaining columns (normalize columns if enabled)
         if normalizeMode then
-            r.ImGui_TableSetColumnIndex(ctx, 6)
-            r.ImGui_Text(ctx, "Normalize")
             r.ImGui_TableSetColumnIndex(ctx, 7)
-            r.ImGui_Text(ctx, "Peak dB")
+            r.ImGui_Text(ctx, "Normalize")
             r.ImGui_TableSetColumnIndex(ctx, 8)
+            r.ImGui_Text(ctx, "Peak dB")
+            r.ImGui_TableSetColumnIndex(ctx, 9)
         else
-            r.ImGui_TableSetColumnIndex(ctx, 6)
+            r.ImGui_TableSetColumnIndex(ctx, 7)
         end
         r.ImGui_Text(ctx, "x")
         
@@ -4619,11 +4516,9 @@ local function drawUI_body()
                     lastClickedRow = rowID
                 end
                 
-                -- Column 1: Lock checkbox and Color swatch
+                -- Column 1: Color swatch
                 r.ImGui_TableSetColumnIndex(ctx, 1)
                 local name = nameCache[tr] or trName(tr)
-                
-                -- Color swatch (always show)
                 do
                     local rgb = effColorCache[tr] or 0
                     local u32 = u32_from_rgb24(rgb)
@@ -4632,15 +4527,15 @@ local function drawUI_body()
                     local swh = (settings.swatch_size or 12)
                     r.ImGui_DrawList_AddRectFilled(dl, x + 2, y + 3, x + 2 + swh, y + 3 + swh, u32, 3.0)
                     r.ImGui_DrawList_AddRect(dl, x + 2, y + 3, x + 2 + swh, y + 3 + swh, 0xFF000000, 3.0, 0, 1.0)
-                    r.ImGui_Dummy(ctx, swh + 8, swh + 2)
-                    r.ImGui_SameLine(ctx, 0, 0)  -- Put lock checkbox on same line
+                    r.ImGui_Dummy(ctx, swh + 4, swh + 2)
                 end
-                
-                -- Lock checkbox (only for first slot)
+
+                -- Column 2: Lock checkbox
+                r.ImGui_TableSetColumnIndex(ctx, 2)
                 local checked = protectedSet[name] and true or false
                 if s == 1 then
                     local ch, nv = r.ImGui_Checkbox(ctx, "##prot_" .. globalRowID, checked)
-                    
+
                     -- Drag-state for Lock checkbox
                     if r.ImGui_IsItemHovered(ctx, r.ImGui_HoveredFlags_AllowWhenBlockedByActiveItem()) then
                         if dragLockState == nil and r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Left()) then
@@ -4650,18 +4545,15 @@ local function drawUI_body()
                             protectedSet[name] = dragLockState or nil
                         end
                     end
-                    
+
                     if ch and dragLockState == nil then
                         protectedSet[name] = nv or nil
                         saveProtected()
                     end
-                else
-                    -- For additional slots, just add spacing to align
-                    r.ImGui_Dummy(ctx, 20, 0)
                 end
-                
-                -- Column 2: Template Destination (Track Name)
-                r.ImGui_TableSetColumnIndex(ctx, 2)
+
+                -- Column 3: Template Destination (Track Name)
+                r.ImGui_TableSetColumnIndex(ctx, 3)
                 local editKey = tostring(i) .. "_" .. tostring(s)
                 -- For slot 1: use actual track name. For slot 2+: use override or original name
                 local slotDisplayName
@@ -4720,8 +4612,8 @@ local function drawUI_body()
                     end
                 end
                 
-                -- Column 3: Recording Sources
-                r.ImGui_TableSetColumnIndex(ctx, 3)
+                -- Column 4: Recording Sources
+                r.ImGui_TableSetColumnIndex(ctx, 4)
                 if #recSources == 0 then
                     r.ImGui_Text(ctx, "(load .RPP or files)")
                 else
@@ -4793,8 +4685,8 @@ local function drawUI_body()
                     if should_skip then goto nextrow end
                 end
                 
-                -- Column 4: Keep Name
-                r.ImGui_TableSetColumnIndex(ctx, 4)
+                -- Column 5: Keep Name
+                r.ImGui_TableSetColumnIndex(ctx, 5)
                 -- Keep Name is now per slot, not per track name
                 keepMap[i] = keepMap[i] or {}
                 local kn = keepMap[i][s] and true or false
@@ -4833,8 +4725,8 @@ local function drawUI_body()
                     end
                 end
                 
-                -- Keep FX (column 5)
-                r.ImGui_TableSetColumnIndex(ctx, 5)
+                -- Keep FX (column 6)
+                r.ImGui_TableSetColumnIndex(ctx, 6)
                 fxMap[i] = fxMap[i] or {}
                 local kfx = fxMap[i][s] and true or false
                 local chkfx, nvkfx = r.ImGui_Checkbox(ctx, "##keepfx_" .. globalRowID, kfx)
@@ -4874,7 +4766,7 @@ local function drawUI_body()
                 
                 -- Normalization profile (only if auto-normalize is enabled)
                 if normalizeMode then
-                    r.ImGui_TableSetColumnIndex(ctx, 6)  -- Shifted from 5 to 6
+                    r.ImGui_TableSetColumnIndex(ctx, 7)
                     
                     -- Each slot gets its own normalization settings
                     normMap[i] = normMap[i] or {}
@@ -4930,7 +4822,7 @@ local function drawUI_body()
                     end
                     
                     -- Target peak
-                    r.ImGui_TableSetColumnIndex(ctx, 7)  -- Shifted from 6 to 7
+                    r.ImGui_TableSetColumnIndex(ctx, 8)
                     r.ImGui_SetNextItemWidth(ctx, -1)
                     local changed, val = r.ImGui_InputInt(ctx, "##peak_" .. globalRowID, normMap[i][s].targetPeak)
                     if changed then
@@ -4957,7 +4849,7 @@ local function drawUI_body()
                 end
                 
                 -- Plus button column (last column)
-                r.ImGui_TableSetColumnIndex(ctx, normalizeMode and 8 or 6)  -- Shifted from 7/5 to 8/6
+                r.ImGui_TableSetColumnIndex(ctx, normalizeMode and 9 or 7)
                 if s == #slots then
                     if r.ImGui_Button(ctx, "+##add_" .. globalRowID) then
                         local newSlot = #slots + 1
@@ -5012,13 +4904,13 @@ local function drawUI_body()
 
     -- Options row 2: Normalization options (horizontal)
     if normalizeMode then
-        changed, val = r.ImGui_Checkbox(ctx, "New lane", settings.createNewLane)
+        changed, val = r.ImGui_Checkbox(ctx, "Import to new lane", settings.createNewLane)
         if changed then
             settings.createNewLane = val
             saveIni()
         end
         r.ImGui_SameLine(ctx)
-        changed, val = r.ImGui_Checkbox(ctx, "Per region", settings.processPerRegion)
+        changed, val = r.ImGui_Checkbox(ctx, "Normalize per region", settings.processPerRegion)
         if changed then
             settings.processPerRegion = val
             saveIni()
@@ -5055,8 +4947,11 @@ local function drawUI_body()
         previewMode = true
     end
 
-    local win_w = r.ImGui_GetWindowWidth(ctx)
-    r.ImGui_SameLine(ctx, win_w - 170)
+    local win_w = r.ImGui_GetContentRegionAvail(ctx)
+    local commitW = r.ImGui_CalcTextSize(ctx, "Commit") + 16
+    local closeW = r.ImGui_CalcTextSize(ctx, "Close") + 16
+    local padding = r.ImGui_GetStyleVar(ctx, r.ImGui_StyleVar_ItemSpacing())
+    r.ImGui_SameLine(ctx, r.ImGui_GetWindowWidth(ctx) - commitW - closeW - padding - r.ImGui_GetStyleVar(ctx, r.ImGui_StyleVar_WindowPadding()))
     if r.ImGui_Button(ctx, "Commit") then
         commitMappings()
     end

@@ -2376,6 +2376,36 @@ local function extractMediaPathsFromChunk(chunk)
     return paths
 end
 
+local function tryResolveMedia(oldPath, rppDir)
+    -- 1. Direct resolve (absolute exists, or relative from rppDir/projDir)
+    local resolved = resolveMediaPath(oldPath, rppDir)
+    if resolved then return resolved end
+
+    -- 2. Try separator variants
+    if oldPath:find("\\") then
+        resolved = resolveMediaPath(oldPath:gsub("\\", "/"), rppDir)
+        if resolved then return resolved end
+    end
+
+    -- 3. Absolute path that doesn't exist — try each suffix segment relative to rppDir
+    --    e.g. "/Old/Location/Audio/file.wav" → try rppDir/Audio/file.wav, rppDir/file.wav
+    local normOld = normalizePath(oldPath)
+    if rppDir and rppDir ~= "" and isAbsolutePath(normOld) then
+        local parts = {}
+        for seg in normOld:gmatch("[^/]+") do
+            parts[#parts + 1] = seg
+        end
+        -- Try progressively shorter suffixes (skip drive/root)
+        for start = 2, #parts do
+            local tail = table.concat(parts, "/", start)
+            local candidate = joinPath(rppDir, tail)
+            if fileExists(candidate) then return candidate end
+        end
+    end
+
+    return nil
+end
+
 local function fixChunkMediaPaths(chunk, doCopy)
     if not chunk then return chunk end
 
@@ -2385,29 +2415,18 @@ local function fixChunkMediaPaths(chunk, doCopy)
     local newChunk = chunk
 
     for _, oldPath in ipairs(mediaPaths) do
-        local resolvedPath = resolveMediaPath(oldPath, recPathRPPDir)
+        local resolvedPath = tryResolveMedia(oldPath, recPathRPPDir)
 
-        -- Also try with backslash variant if forward-slash resolve failed
-        if not resolvedPath and oldPath:find("\\") then
-            resolvedPath = resolveMediaPath(oldPath:gsub("\\", "/"), recPathRPPDir)
-        end
-        if not resolvedPath and oldPath:find("/") then
-            resolvedPath = resolveMediaPath(oldPath:gsub("/", "\\"), recPathRPPDir)
-        end
-
-        if resolvedPath and fileExists(resolvedPath) then
+        if resolvedPath then
             local finalPath = resolvedPath
-
             if doCopy then
                 finalPath = copyMediaToProject(resolvedPath)
             end
 
-            log(string.format("  fixChunkMediaPaths: '%s' -> '%s'\n", oldPath, finalPath))
+            r.ShowConsoleMsg(string.format("  fixChunk: '%s' -> '%s'\n", oldPath, finalPath))
 
             if finalPath ~= oldPath then
-                -- Escape pattern special chars in oldPath for matching
                 local escapedOld = oldPath:gsub("([%.%-%+%*%?%[%]%(%)%^%$%%])", "%%%1")
-                -- Escape % in replacement string (only special char in gsub replacement)
                 local safeNew = finalPath:gsub("%%", "%%%%")
 
                 local quotedOld = '"' .. escapedOld .. '"'
@@ -2422,7 +2441,7 @@ local function fixChunkMediaPaths(chunk, doCopy)
                 end
             end
         else
-            log(string.format("  fixChunkMediaPaths: UNRESOLVED '%s' (rppDir='%s')\n", oldPath, recPathRPPDir or "nil"))
+            r.ShowConsoleMsg(string.format("  fixChunk UNRESOLVED: '%s'\n", oldPath))
         end
     end
 
@@ -2458,12 +2477,7 @@ local function postprocessTrackCopyRelink(track, doCopy)
                                 end
                             elseif not fileExists(cur) then
                                 -- No-copy mode: resolve and relink offline sources
-                                local resolved = resolveMediaPath(cur, recPathRPPDir)
-                                -- Also try basename only in rppDir
-                                if not resolved then
-                                    local bn = getBasename(cur)
-                                    resolved = resolveMediaPath(bn, recPathRPPDir)
-                                end
+                                local resolved = tryResolveMedia(cur, recPathRPPDir)
                                 if resolved and fileExists(resolved) then
                                     log(string.format("    relink: '%s' -> '%s'\n", cur, resolved))
                                     local newSrc = r.PCM_Source_CreateFromFile(resolved)

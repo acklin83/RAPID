@@ -4283,7 +4283,7 @@ local function drawUI_body()
         local COLFIX = r.ImGui_TableColumnFlags_WidthFixed()
         r.ImGui_TableSetupColumn(ctx, "Sel", COLFIX, 25.0)
         r.ImGui_TableSetupColumn(ctx, "##color", COLFIX, 18.0)  -- Color swatch (no title)
-        r.ImGui_TableSetupColumn(ctx, "\xE2\x9A\xBF", COLFIX, 25.0)  -- Lock column (⚿)
+        r.ImGui_TableSetupColumn(ctx, "##lock", COLFIX, 25.0)  -- Lock column (drawn icon)
         r.ImGui_TableSetupColumn(ctx, "Template Destinations")  -- Mix tracks
         r.ImGui_TableSetupColumn(ctx, "Recording Sources")
         r.ImGui_TableSetupColumn(ctx, "Keep name", COLFIX, 80.0)
@@ -4335,9 +4335,23 @@ local function drawUI_body()
         -- Column 1: Color swatch (no header)
         r.ImGui_TableSetColumnIndex(ctx, 1)
 
-        -- Column 2: Lock (clickable to toggle all protected)
+        -- Column 2: Lock (clickable to toggle all protected) - draw lock icon
         r.ImGui_TableSetColumnIndex(ctx, 2)
-        if r.ImGui_Selectable(ctx, "\xE2\x9A\xBF##header", false) then
+        do
+            local cx, cy = r.ImGui_GetCursorScreenPos(ctx)
+            local colW = r.ImGui_GetColumnWidth(ctx)
+            local lineH = r.ImGui_GetTextLineHeight(ctx)
+            local dl = r.ImGui_GetWindowDrawList(ctx)
+            local sz = 10  -- icon size
+            local ix = cx + (colW - sz) * 0.5  -- center horizontally
+            local iy = cy + (lineH - sz) * 0.5 + 1  -- center vertically
+            local col = 0xAAAAAAFF  -- light gray
+            -- Lock body (filled rect)
+            r.ImGui_DrawList_AddRectFilled(dl, ix + 1, iy + 4, ix + sz - 1, iy + sz, col, 1.5)
+            -- Lock shackle (arc on top)
+            r.ImGui_DrawList_AddRect(dl, ix + 2.5, iy, ix + sz - 2.5, iy + 5.5, col, 2.0, 0, 1.5)
+        end
+        if r.ImGui_Selectable(ctx, "##lockheader", false) then
             -- Check if any tracks are protected
             local anyProtected = false
             for i, tr in ipairs(mixTargets) do

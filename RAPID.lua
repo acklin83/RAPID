@@ -4337,7 +4337,7 @@ local function drawUI_body()
 
         -- Column 2: Lock (clickable to toggle all protected)
         r.ImGui_TableSetColumnIndex(ctx, 2)
-        if r.ImGui_Selectable(ctx, "\xF0\x9F\x94\x92##header", false) then
+        if r.ImGui_Selectable(ctx, "Lk##header", false) then
             -- Check if any tracks are protected
             local anyProtected = false
             for i, tr in ipairs(mixTargets) do

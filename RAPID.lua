@@ -1,4 +1,4 @@
- -- RAPID - Recording Auto-Placement & Intelligent Dynamics v2.2
+-- RAPID - Recording Auto-Placement & Intelligent Dynamics v2.4
 --
 -- Unified version combining RAPID (Import & Mapping) with Little Joe (Normalize-Only)
 --
@@ -10,22 +10,26 @@
 --
 -- See Project Notes for full documentation
 --
+-- NEW in v2.4:
+-- - LUFS Calibration System: Create/update profiles from perfectly leveled reference tracks
+-- - Per-profile LUFS measurement settings (segment size, percentile, threshold)
+-- - Removed global LUFS settings (now profile-specific or use defaults)
+-- - "Calibrate from Selection" button in Settings → Normalization tab
+--
+-- NEW in v2.3:
+-- - Editable track names, duplicate slot improvements, delete unused toggle
+-- - Offline media fix (progressive path suffix matching)
+-- - DrawList lock icon, help text rewrite
+--
 -- NEW in v2.2:
 -- - MixnoteStyle dark theme (Indigo accent, 4-level background hierarchy)
--- - Compact toolbar layout (single row, sec_button for secondary actions)
--- - Settings/Help moved to header (right-aligned)
--- - Reduced padding/spacing for denser data display
--- - Action buttons: Preview left, Commit/Close right-aligned
--- - Shorter option labels (New lane, Per region, Delete gaps, Copy media)
+-- - Compact toolbar layout, sec_button for secondary actions
 --
--- NEW in v2.1:
--- - Auto-Duplicate: Automatically creates duplicate template tracks when multiple
---   recording sources match to the same template track
 
 local r = reaper
 
 -- ===== VERSION =====
-local VERSION = "2.3"
+local VERSION = "2.4"
 local WINDOW_TITLE = "RAPID v" .. VERSION
 
 -- ===== Capability checks =====
@@ -44,6 +48,11 @@ local AUTOSUGGEST_THRESH = 0.60
 
 -- LUFS type for CalculateNormalization: 4 = LUFS-M max (Momentary max)
 local LUFS_TYPE_M_MAX = 4
+
+-- Default LUFS measurement settings (used when profile doesn't have custom settings)
+local DEFAULT_LUFS_SEGMENT_SIZE = 10.0      -- seconds (5-30)
+local DEFAULT_LUFS_PERCENTILE = 90          -- percent (80-99)
+local DEFAULT_LUFS_THRESHOLD = -40.0        -- LUFS (segments below this are ignored)
 
 -- ===== ExtState Keys =====
 local EXT_SECTION  = "RAPID_Unified"
@@ -109,58 +118,57 @@ local DEFAULT_PROFILE_ALIASES = {
 local ctx
 
 -- ===== MIXNOTE THEME =====
-local THEME_COLOR_COUNT = 26
-local THEME_VAR_COUNT = 10
-
--- Backgrounds (4-level hierarchy)
-local bg_body   = 0x0F0F0FFF
-local bg_card   = 0x1A1A1AFF
-local bg_input  = 0x2A2A2AFF
-local bg_border = 0x3A3A3AFF
-
--- Accent (Indigo)
-local accent        = 0x6366F1FF
-local accent_hover  = 0x5558E8FF
-local accent_active = 0x4F46E5FF
-local accent_dim    = 0x6366F140
-
--- Text
-local text       = 0xE5E7EBFF
-local text_dim   = 0x9CA3AFFF
-local text_muted = 0x6B7280FF
-
--- Status
-local clr_green  = 0x4ADE80FF
-local clr_amber  = 0xF59E0BFF
-local clr_red    = 0xEF4444FF
+-- Theme colors consolidated into table to reduce local variable count
+local theme = {
+    COLOR_COUNT = 26,
+    VAR_COUNT = 10,
+    -- Backgrounds (4-level hierarchy)
+    bg_body   = 0x0F0F0FFF,
+    bg_card   = 0x1A1A1AFF,
+    bg_input  = 0x2A2A2AFF,
+    bg_border = 0x3A3A3AFF,
+    -- Accent (Indigo)
+    accent        = 0x6366F1FF,
+    accent_hover  = 0x5558E8FF,
+    accent_active = 0x4F46E5FF,
+    accent_dim    = 0x6366F140,
+    -- Text
+    text       = 0xE5E7EBFF,
+    text_dim   = 0x9CA3AFFF,
+    text_muted = 0x6B7280FF,
+    -- Status
+    green  = 0x4ADE80FF,
+    amber  = 0xF59E0BFF,
+    red    = 0xEF4444FF,
+}
 
 local function apply_theme()
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_WindowBg(),       bg_body)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_WindowBg(),       theme.bg_body)
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ChildBg(),        0x00000000)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(),        bg_card)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Border(),         bg_border)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(),           text)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TextDisabled(),   text_muted)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(),        bg_input)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgHovered(), bg_border)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgActive(),  bg_border)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(),         accent)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(),  accent_hover)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(),   accent_active)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Header(),         accent_dim)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(),        theme.bg_card)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Border(),         theme.bg_border)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(),           theme.text)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TextDisabled(),   theme.text_muted)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(),        theme.bg_input)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgHovered(), theme.bg_border)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgActive(),  theme.bg_border)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(),         theme.accent)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(),  theme.accent_hover)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(),   theme.accent_active)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Header(),         theme.accent_dim)
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(),  0x6366F160)
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(),   0x6366F180)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Tab(),            bg_card)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TabHovered(),     accent)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ScrollbarBg(),    bg_body)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ScrollbarGrab(),  bg_border)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ScrollbarGrabHovered(), text_muted)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ScrollbarGrabActive(),  text_dim)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Separator(),      bg_border)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_CheckMark(),      accent)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TitleBg(),        bg_body)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TitleBgActive(),  bg_card)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TitleBgCollapsed(), bg_body)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Tab(),            theme.bg_card)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TabHovered(),     theme.accent)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ScrollbarBg(),    theme.bg_body)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ScrollbarGrab(),  theme.bg_border)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ScrollbarGrabHovered(), theme.text_muted)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ScrollbarGrabActive(),  theme.text_dim)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Separator(),      theme.bg_border)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_CheckMark(),      theme.accent)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TitleBg(),        theme.bg_body)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TitleBgActive(),  theme.bg_card)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TitleBgCollapsed(), theme.bg_body)
 
     r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_WindowPadding(),     8, 8)
     r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_FramePadding(),      6, 3)
@@ -175,14 +183,14 @@ local function apply_theme()
 end
 
 local function pop_theme()
-    r.ImGui_PopStyleColor(ctx, THEME_COLOR_COUNT)
-    r.ImGui_PopStyleVar(ctx, THEME_VAR_COUNT)
+    r.ImGui_PopStyleColor(ctx, theme.COLOR_COUNT)
+    r.ImGui_PopStyleVar(ctx, theme.VAR_COUNT)
 end
 
 local function sec_button(label)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(),        bg_input)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), bg_border)
-    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(),  text_muted)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(),        theme.bg_input)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), theme.bg_border)
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(),  theme.text_muted)
     local pressed = r.ImGui_SmallButton(ctx, label)
     r.ImGui_PopStyleColor(ctx, 3)
     return pressed
@@ -204,21 +212,18 @@ local settings = {
     -- Mode settings
     importMode = true,
     normalizeMode = true,
-    
+
     -- Import mode settings
     autoMatchTracksOnImport = true,
     autoMatchProfilesOnImport = true,
-    
+
     -- Normalize mode settings
     processPerRegion = true,
     createNewLane = true,
     deleteBetweenRegions = true,
-    
-    -- LUFS settings (shared)
-    lufsSegmentSize = 10.0,       -- seconds (5-30)
-    lufsPercentile = 90,          -- percent (80-99)
-    lufsSegmentThreshold = -40.0, -- LUFS (segments below this are ignored)
-    
+
+    -- Note: LUFS settings are now per-profile (see DEFAULT_LUFS_* constants for defaults)
+
     -- UI settings
     swatch_size = 12,
     enableConsoleLogging = false
@@ -258,6 +263,24 @@ local editingDestTrack = nil -- Edit key "i_s" currently being renamed (double-c
 local editingDestBuf = ""    -- Buffer for the InputText
 local slotNameOverride = {}  -- slotNameOverride[i][s] = custom name for duplicate slots (s >= 2)
 
+-- Calibration window state
+local calibrationWindow = {
+    open = false,
+    itemName = "",
+    measuredPeak = 0,
+    measuredLUFS = 0,
+    calculatedOffset = 0,
+    editablePeak = 0,
+    -- Measurement settings (editable in dialog)
+    segmentSize = DEFAULT_LUFS_SEGMENT_SIZE,
+    percentile = DEFAULT_LUFS_PERCENTILE,
+    threshold = DEFAULT_LUFS_THRESHOLD,
+    -- Profile selection
+    selectedProfileIdx = 0,  -- 0 = "Create new"
+    newProfileName = "",
+    errorMsg = "",
+}
+
 -- Caches
 local hasKids = setmetatable({}, {__mode="k"})
 local nameCache = setmetatable({}, {__mode="k"})
@@ -278,12 +301,27 @@ _G.__keepSet = keepSet
 -- ===== EARLY UTILITY FUNCTIONS (needed before saveLastMap) =====
 local function validTrack(t) return t and r.ValidatePtr(t, "MediaTrack*") end
 
+local function trackHasItems(tr)
+    return validTrack(tr) and r.CountTrackMediaItems(tr) > 0
+end
+
 local function trName(tr)
     if not validTrack(tr) then return "" end
     local _, n = r.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
     return n or ""
-end  -- Legacy compatibility
+end
+
+local function calculateLUFS(targetPeak, offset)
+    return targetPeak - offset
+end
+
 _G.__keepMap = keepMap
+
+-- Forward declarations for functions used before definition
+local normalizeTrack
+local normalizeTrackDirect
+local scanRegions
+local getProfileByName
 
 -- ===== HELPER FUNCTIONS =====
 local function showError(msg)
@@ -487,13 +525,23 @@ local function saveSharedNormalizationSettings()
     end
     
     -- [Profiles]
+    -- Format: Name,Offset,DefaultPeak[,SegmentSize,Percentile,Threshold]
+    -- Last 3 fields are optional (only written if profile has custom LUFS settings)
     f:write("[Profiles]\n")
     f:write("Count=" .. #normProfiles .. "\n")
     for i, p in ipairs(normProfiles) do
-        f:write(string.format("Profile%d=%s,%d,%d\n", i, p.name, p.offset, p.defaultPeak))
+        if p.lufsSegmentSize then
+            -- Profile has custom LUFS settings
+            f:write(string.format("Profile%d=%s,%d,%d,%.1f,%d,%.1f\n",
+                i, p.name, p.offset, p.defaultPeak,
+                p.lufsSegmentSize, p.lufsPercentile, p.lufsThreshold))
+        else
+            -- Profile uses defaults
+            f:write(string.format("Profile%d=%s,%d,%d\n", i, p.name, p.offset, p.defaultPeak))
+        end
     end
     f:write("\n")
-    
+
     -- [ProfileAliases]
     f:write("[ProfileAliases]\n")
     f:write("Count=" .. #profileAliases .. "\n")
@@ -501,14 +549,9 @@ local function saveSharedNormalizationSettings()
         f:write(string.format("ProfileAlias%d=%s,%s\n", i, a.src, a.dst))
     end
     f:write("\n")
-    
-    -- [LufsSettings]
-    f:write("[LufsSettings]\n")
-    f:write("SegmentSize=" .. tostring(settings.lufsSegmentSize) .. "\n")
-    f:write("Percentile=" .. tostring(settings.lufsPercentile) .. "\n")
-    f:write("SegmentThreshold=" .. tostring(settings.lufsSegmentThreshold) .. "\n")
-    f:write("\n")
-    
+
+    -- Note: [LufsSettings] section is no longer written (settings are now per-profile)
+
     f:close()
 end
 
@@ -563,18 +606,33 @@ local function loadSharedNormalizationSettings()
     f:close()
     
     -- Parse [Profiles]
+    -- Format: Name,Offset,DefaultPeak[,SegmentSize,Percentile,Threshold]
     normProfiles = {}
     local profileCount = tonumber(content:match("%[Profiles%].-Count=(%d+)")) or 0
     for i = 1, profileCount do
         local line = content:match("Profile" .. i .. "=([^\n]+)")
         if line then
-            local name, offset, peak = line:match("^(.-),(%d+),(-?%d+)$")
-            if name and offset and peak then
+            -- Try extended format first: Name,Offset,Peak,SegSize,Pct,Threshold
+            local name, offset, peak, segSize, pct, thresh = line:match("^(.-),(-?%d+),(-?%d+),([%d%.]+),(%d+),([-%d%.]+)$")
+            if name and offset and peak and segSize then
                 normProfiles[#normProfiles + 1] = {
                     name = name,
                     offset = tonumber(offset),
-                    defaultPeak = tonumber(peak)
+                    defaultPeak = tonumber(peak),
+                    lufsSegmentSize = tonumber(segSize),
+                    lufsPercentile = tonumber(pct),
+                    lufsThreshold = tonumber(thresh)
                 }
+            else
+                -- Fall back to basic format: Name,Offset,Peak
+                name, offset, peak = line:match("^(.-),(-?%d+),(-?%d+)$")
+                if name and offset and peak then
+                    normProfiles[#normProfiles + 1] = {
+                        name = name,
+                        offset = tonumber(offset),
+                        defaultPeak = tonumber(peak)
+                    }
+                end
             end
         end
     end
@@ -616,22 +674,9 @@ local function loadSharedNormalizationSettings()
         end
     end
     
-    -- Parse [LufsSettings]
-    local segmentSize = content:match("%[LufsSettings%].-SegmentSize=([%d%.]+)")
-    if segmentSize then
-        settings.lufsSegmentSize = tonumber(segmentSize) or 10.0
-    end
-    
-    local percentile = content:match("%[LufsSettings%].-Percentile=(%d+)")
-    if percentile then
-        settings.lufsPercentile = tonumber(percentile) or 90
-    end
-    
-    local threshold = content:match("%[LufsSettings%].-SegmentThreshold=([-%d%.]+)")
-    if threshold then
-        settings.lufsSegmentThreshold = tonumber(threshold) or -40.0
-    end
-    
+    -- Note: [LufsSettings] section is ignored (backwards compatibility)
+    -- LUFS settings are now stored per-profile
+
     return true
 end
 
@@ -668,6 +713,9 @@ local function loadIni()
         for _, a in ipairs(DEFAULT_ALIASES) do
             aliases[#aliases + 1] = {src = a.src, dst = a.dst}
         end
+        -- Sync global mode variables from settings defaults
+        importMode = settings.importMode
+        normalizeMode = settings.normalizeMode
         return
     end
     
@@ -1938,7 +1986,7 @@ local function autosuggest()
 end
 
 -- ===== HELPER FOR PROFILES =====
-local function getProfileByName(name)
+getProfileByName = function(name)
     if not name or name == "" or name == "-" then return nil end
     for _, p in ipairs(normProfiles) do
         if p.name == name then
@@ -2274,8 +2322,8 @@ local function doNormalizeDirectly()
     -- Normalize each track
     local normalizedCount = 0
     for _, proc in ipairs(toProcess) do
-        local normType, targetValue
-        
+        local normType, targetValue, usedProfile
+
         if proc.profile == "Peak" then
             normType = "Peak"
             targetValue = proc.targetPeak
@@ -2291,20 +2339,21 @@ local function doNormalizeDirectly()
             if profile then
                 normType = "LUFS"
                 targetValue = calculateLUFS(proc.targetPeak, profile.offset)
+                usedProfile = profile  -- Store for passing to normalizeTrack
                 log(string.format("\nNormalizing: %s\n", proc.name))
-                log(string.format("  Profile: %s, Peak: %.1f dB, LUFS: %.1f\n", 
+                log(string.format("  Profile: %s, Peak: %.1f dB, LUFS: %.1f\n",
                     proc.profile, proc.targetPeak, targetValue))
             end
         end
-        
+
         if normType and targetValue then
             local success
             if settings.createNewLane then
                 -- Use stored target lane from duplication
                 local targetLane = trackLanes[proc.track]
-                success = normalizeTrack(proc.track, normType, targetValue, regions, targetLane)
+                success = normalizeTrack(proc.track, normType, targetValue, regions, targetLane, usedProfile)
             else
-                success = normalizeTrackDirect(proc.track, normType, targetValue, regions)
+                success = normalizeTrackDirect(proc.track, normType, targetValue, regions, usedProfile)
             end
             
             if success then
@@ -2875,11 +2924,8 @@ local function replaceMixWithSourceAtSamePosition(entry, mixTr)
 end
 
 -- ===== NORMALIZATION FUNCTIONS =====
-local function calculateLUFS(targetPeak, offset)
-    return targetPeak - offset
-end
 
-local function scanRegions()
+scanRegions = function()
     local regions = {}
     local _, numMarkers, numRegions = r.CountProjectMarkers(0)
     
@@ -2921,8 +2967,21 @@ end
 
 -- ===== GROUP-BASED NORMALIZATION (v1.2) =====
 -- Helper: Measures the loudest item in a list and returns its level
-local function measureLoudestItem(items, measureType)
+-- lufsSettings is optional: {segmentSize, percentile, threshold}
+local function measureLoudestItem(items, measureType, lufsSettings)
     if #items == 0 then return nil end
+
+    -- Get LUFS settings (use profile settings or defaults)
+    local segmentSize, percentile, threshold
+    if lufsSettings then
+        segmentSize = lufsSettings.segmentSize or DEFAULT_LUFS_SEGMENT_SIZE
+        percentile = lufsSettings.percentile or DEFAULT_LUFS_PERCENTILE
+        threshold = lufsSettings.threshold or DEFAULT_LUFS_THRESHOLD
+    else
+        segmentSize = DEFAULT_LUFS_SEGMENT_SIZE
+        percentile = DEFAULT_LUFS_PERCENTILE
+        threshold = DEFAULT_LUFS_THRESHOLD
+    end
     
     local loudestValue = nil
     local loudestItem = nil
@@ -2935,40 +2994,40 @@ local function measureLoudestItem(items, measureType)
                 local currentValue = nil
                 
                 if measureType == "Peak" or measureType == "RMS" then
-                    -- Peak/RMS measurement
+                    -- Peak/RMS measurement using AudioAccessor (measures actual item content)
                     local accessor = r.CreateTakeAudioAccessor(take)
                     if accessor then
                         local itemLen = r.GetMediaItemInfo_Value(item, "D_LENGTH")
                         local samplerate = r.GetMediaSourceSampleRate(source)
                         local n_ch = r.GetMediaSourceNumChannels(source)
                         local totalSamples = math.floor(itemLen * samplerate)
-                        
+
                         local maxPeak = 0
                         local sumSquared = 0
                         local numSamples = 0
-                        local buffer = r.new_array(n_ch * 4096)
+                        -- Use larger buffer for better performance (64k samples)
+                        local bufferSize = 65536
+                        local buffer = r.new_array(n_ch * bufferSize)
                         local pos = 0
-                        
+
                         while pos < totalSamples do
-                            local toRead = math.min(4096, totalSamples - pos)
+                            local toRead = math.min(bufferSize, totalSamples - pos)
                             r.GetAudioAccessorSamples(accessor, samplerate, n_ch, pos / samplerate, toRead, buffer)
-                            
-                            for i = 0, toRead - 1 do
-                                for c = 0, n_ch - 1 do
-                                    local val = math.abs(buffer[i * n_ch + c + 1])
-                                    maxPeak = math.max(maxPeak, val)
-                                    if measureType == "RMS" then
-                                        sumSquared = sumSquared + (val * val)
-                                        numSamples = numSamples + 1
-                                    end
+
+                            for i = 1, toRead * n_ch do
+                                local val = math.abs(buffer[i])
+                                if val > maxPeak then maxPeak = val end
+                                if measureType == "RMS" then
+                                    sumSquared = sumSquared + (val * val)
+                                    numSamples = numSamples + 1
                                 end
                             end
-                            
+
                             pos = pos + toRead
                         end
-                        
+
                         r.DestroyAudioAccessor(accessor)
-                        
+
                         if measureType == "Peak" then
                             currentValue = maxPeak
                         else -- RMS
@@ -2976,43 +3035,46 @@ local function measureLoudestItem(items, measureType)
                                 currentValue = math.sqrt(sumSquared / numSamples)
                             end
                         end
+
+                        log(string.format("      %s measure: %.4f (%.2f dB), len=%.2fs\n",
+                            measureType, currentValue or 0,
+                            currentValue and currentValue > 0 and (20 * math.log(currentValue, 10)) or -999,
+                            itemLen))
                     end
                 else -- LUFS
                     -- LUFS-M max measurement with configurable percentile
                     local itemLen = r.GetMediaItemInfo_Value(item, "D_LENGTH")
-                    local segmentSize = settings.lufsSegmentSize
-                    local segmentThreshold = settings.lufsSegmentThreshold
                     local measurements = {}
-                    
+
                     local pos = 0
                     while pos < itemLen do
-                        local segmentEnd = math.min(pos + segmentSize, itemLen)
-                        
+                        local segEnd = math.min(pos + segmentSize, itemLen)
+
                         local volumeMultiplier = r.CalculateNormalization(
                             source,
                             LUFS_TYPE_M_MAX,
                             -23.0,  -- Temporary reference
                             pos,
-                            segmentEnd
+                            segEnd
                         )
-                        
+
                         if volumeMultiplier and volumeMultiplier > 0 then
                             local gainDB = 20 * math.log(volumeMultiplier, 10)
                             local currentLUFS = -23.0 - gainDB
-                            
+
                             -- Only add segments ABOVE threshold (ignore silent/quiet segments)
-                            if currentLUFS > segmentThreshold then
+                            if currentLUFS > threshold then
                                 measurements[#measurements + 1] = currentLUFS
                             end
                         end
-                        
+
                         pos = pos + segmentSize
                     end
-                    
+
                     if #measurements > 0 then
                         table.sort(measurements)
-                        local percentile = settings.lufsPercentile / 100.0
-                        local percentileIndex = math.floor(#measurements * percentile)
+                        local pctFrac = percentile / 100.0
+                        local percentileIndex = math.floor(#measurements * pctFrac)
                         if percentileIndex < 1 then percentileIndex = 1 end
                         currentValue = measurements[percentileIndex]
                     end
@@ -3050,27 +3112,29 @@ local function applyGainToItems(items, gainDB)
 end
 
 -- Group-based LUFS normalization: Find loudest item, apply same gain to all
-local function normalizeLUFSGroup(items, targetLUFS)
+-- lufsSettings is optional: {segmentSize, percentile, threshold}
+local function normalizeLUFSGroup(items, targetLUFS, lufsSettings)
     if #items == 0 then return false end
-    
+
     log(string.format("    Measuring loudest of %d items...\n", #items))
-    
-    local loudestLUFS, loudestItem = measureLoudestItem(items, "LUFS")
-    
+
+    local loudestLUFS, loudestItem = measureLoudestItem(items, "LUFS", lufsSettings)
+
     if not loudestLUFS then
         log("    No valid LUFS measurements\n")
         return false
     end
-    
-    log(string.format("    Loudest item: %.1f LUFS (90th percentile)\n", loudestLUFS))
-    
+
+    local pct = (lufsSettings and lufsSettings.percentile) or DEFAULT_LUFS_PERCENTILE
+    log(string.format("    Loudest item: %.1f LUFS (%dth percentile)\n", loudestLUFS, pct))
+
     -- Calculate required gain
     local gainDB = targetLUFS - loudestLUFS
     log(string.format("    Applying %.2f dB gain to all %d items\n", gainDB, #items))
-    
+
     -- Apply gain to ALL items
     applyGainToItems(items, gainDB)
-    
+
     return true
 end
 
@@ -3104,10 +3168,14 @@ end
 -- ===== OLD PER-ITEM NORMALIZATION (DEPRECATED - kept for reference) =====
 local function normalizeLUFS(items, targetLUFS)
     if #items == 0 then return false end
-    
+
     local successCount = 0
     local failCount = 0
-    
+
+    -- Use default LUFS settings (this function is deprecated)
+    local segmentSize = DEFAULT_LUFS_SEGMENT_SIZE
+    local pctValue = DEFAULT_LUFS_PERCENTILE
+
     for _, item in ipairs(items) do
         local take = r.GetActiveTake(item)
         if take then
@@ -3115,15 +3183,14 @@ local function normalizeLUFS(items, targetLUFS)
             if source then
                 -- Get item length
                 local itemLen = r.GetMediaItemInfo_Value(item, "D_LENGTH")
-                
-                -- Measure LUFS-M max in segments with configurable settings
-                local segmentSize = settings.lufsSegmentSize
+
+                -- Measure LUFS-M max in segments
                 local measurements = {}
-                
+
                 local pos = 0
                 while pos < itemLen do
                     local segmentEnd = math.min(pos + segmentSize, itemLen)
-                    
+
                     -- Measure LUFS-M max for this segment
                     local volumeMultiplier = r.CalculateNormalization(
                         source,
@@ -3132,29 +3199,29 @@ local function normalizeLUFS(items, targetLUFS)
                         pos,
                         segmentEnd
                     )
-                    
+
                     if volumeMultiplier and volumeMultiplier > 0 then
                         -- Convert multiplier to current LUFS
                         local gainDB = 20 * math.log(volumeMultiplier, 10)
                         local currentLUFS = targetLUFS - gainDB
                         measurements[#measurements + 1] = currentLUFS
                     end
-                    
+
                     pos = pos + segmentSize
                 end
-                
+
                 if #measurements > 0 then
                     -- Sort measurements
                     table.sort(measurements)
-                    
-                    -- Get configured percentile
-                    local percentile = settings.lufsPercentile / 100.0
+
+                    -- Get percentile
+                    local percentile = pctValue / 100.0
                     local percentileIndex = math.floor(#measurements * percentile)
                     if percentileIndex < 1 then percentileIndex = 1 end
                     local percentileValue = measurements[percentileIndex]
-                    
-                    log(string.format("    LUFS-M segments: %d, %dth percentile: %.1f LUFS\n", 
-                        #measurements, settings.lufsPercentile, percentileValue))
+
+                    log(string.format("    LUFS-M segments: %d, %dth percentile: %.1f LUFS\n",
+                        #measurements, pctValue, percentileValue))
                     
                     -- Calculate gain needed from percentile to target
                     local gainDB = targetLUFS - percentileValue
@@ -3261,6 +3328,223 @@ local function normalizePeakOrRMS(items, targetDB, useRMS)
     end
     
     return successCount > 0
+end
+
+-- ===== CALIBRATION FUNCTIONS =====
+
+-- Gets LUFS settings from a profile, falling back to defaults
+local function getProfileLufsSettings(profile)
+    if profile and profile.lufsSegmentSize then
+        return profile.lufsSegmentSize, profile.lufsPercentile, profile.lufsThreshold
+    end
+    return DEFAULT_LUFS_SEGMENT_SIZE, DEFAULT_LUFS_PERCENTILE, DEFAULT_LUFS_THRESHOLD
+end
+
+-- Measures Peak and LUFS of the currently selected item in REAPER
+local function measureSelectedItemLoudness(segmentSize, percentile, threshold)
+    -- 1. Get selected item
+    local item = r.GetSelectedMediaItem(0, 0)
+    if not item then
+        return nil, "No item selected"
+    end
+
+    -- 2. Get take and source
+    local take = r.GetActiveTake(item)
+    if not take then
+        return nil, "Item has no active take"
+    end
+
+    local source = r.GetMediaItemTake_Source(take)
+    if not source then
+        return nil, "Could not get audio source"
+    end
+
+    -- 3. Item boundaries
+    local itemLen = r.GetMediaItemInfo_Value(item, "D_LENGTH")
+    local takeOffset = r.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS")
+
+    -- 4. Measure Peak using AudioAccessor (accounts for item boundaries correctly)
+    local accessor = r.CreateTakeAudioAccessor(take)
+    if not accessor then
+        return nil, "Could not create audio accessor"
+    end
+
+    local samplerate = r.GetMediaSourceSampleRate(source)
+    local numChannels = r.GetMediaSourceNumChannels(source)
+    local totalSamples = math.floor(itemLen * samplerate)
+
+    local maxPeak = 0
+    local bufferSize = 4096
+    local buffer = r.new_array(numChannels * bufferSize)
+    local pos = 0
+
+    while pos < totalSamples do
+        local samplesToRead = math.min(bufferSize, totalSamples - pos)
+        r.GetAudioAccessorSamples(accessor, samplerate, numChannels, pos / samplerate, samplesToRead, buffer)
+
+        for i = 1, samplesToRead * numChannels do
+            local val = math.abs(buffer[i])
+            if val > maxPeak then
+                maxPeak = val
+            end
+        end
+
+        pos = pos + samplesToRead
+    end
+
+    r.DestroyAudioAccessor(accessor)
+
+    local peakDB = -math.huge
+    if maxPeak > 0 then
+        peakDB = 20 * math.log(maxPeak, 10)
+    end
+
+    -- 5. Measure LUFS using segment-based approach
+    local measurements = {}
+    local pos = 0
+    while pos < itemLen do
+        local segmentEnd = math.min(pos + segmentSize, itemLen)
+
+        local volumeMultiplier = r.CalculateNormalization(
+            source,
+            LUFS_TYPE_M_MAX,
+            -23.0,  -- Temporary reference
+            takeOffset + pos,
+            takeOffset + segmentEnd
+        )
+
+        if volumeMultiplier and volumeMultiplier > 0 then
+            local gainDB = 20 * math.log(volumeMultiplier, 10)
+            local currentLUFS = -23.0 - gainDB
+
+            -- Only add segments ABOVE threshold (ignore silent/quiet segments)
+            if currentLUFS > threshold then
+                measurements[#measurements + 1] = currentLUFS
+            end
+        end
+
+        pos = pos + segmentSize
+    end
+
+    local lufsDB = -math.huge
+    if #measurements > 0 then
+        table.sort(measurements)
+        local percentileIdx = math.floor(#measurements * (percentile / 100.0))
+        if percentileIdx < 1 then percentileIdx = 1 end
+        lufsDB = measurements[percentileIdx]
+    else
+        return nil, "No valid LUFS measurements (item too quiet?)"
+    end
+
+    -- 6. Account for item gain AND take gain (AudioAccessor returns raw audio, ignores both)
+    local itemGain = r.GetMediaItemInfo_Value(item, "D_VOL")
+    local takeGain = r.GetMediaItemTakeInfo_Value(take, "D_VOL")
+
+    if itemGain and itemGain > 0 then
+        local itemGainDB = 20 * math.log(itemGain, 10)
+        peakDB = peakDB + itemGainDB
+        lufsDB = lufsDB + itemGainDB
+    end
+
+    if takeGain and takeGain > 0 then
+        local takeGainDB = 20 * math.log(takeGain, 10)
+        peakDB = peakDB + takeGainDB
+        lufsDB = lufsDB + takeGainDB
+    end
+
+    -- 8. Get item name
+    local _, itemName = r.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
+    if itemName == "" then
+        itemName = "Unnamed Item"
+    end
+
+    return {
+        name = itemName,
+        peak = peakDB,
+        lufs = lufsDB,
+        offset = math.floor(peakDB - lufsDB + 0.5)
+    }, nil
+end
+
+-- Opens the calibration dialog and performs initial measurement
+local function openCalibrationWindow()
+    -- Initialize with defaults
+    calibrationWindow.segmentSize = DEFAULT_LUFS_SEGMENT_SIZE
+    calibrationWindow.percentile = DEFAULT_LUFS_PERCENTILE
+    calibrationWindow.threshold = DEFAULT_LUFS_THRESHOLD
+    calibrationWindow.selectedProfileIdx = 0
+    calibrationWindow.newProfileName = ""
+    calibrationWindow.errorMsg = ""
+
+    -- Measure
+    local result, err = measureSelectedItemLoudness(
+        calibrationWindow.segmentSize,
+        calibrationWindow.percentile,
+        calibrationWindow.threshold
+    )
+
+    if not result then
+        calibrationWindow.open = true
+        calibrationWindow.errorMsg = err
+        calibrationWindow.itemName = ""
+        return
+    end
+
+    calibrationWindow.open = true
+    calibrationWindow.itemName = result.name
+    calibrationWindow.measuredPeak = result.peak
+    calibrationWindow.measuredLUFS = result.lufs
+    calibrationWindow.calculatedOffset = result.offset
+end
+
+-- Re-measures with updated settings
+local function remeasureCalibration()
+    local result, err = measureSelectedItemLoudness(
+        calibrationWindow.segmentSize,
+        calibrationWindow.percentile,
+        calibrationWindow.threshold
+    )
+
+    if not result then
+        calibrationWindow.errorMsg = err
+        return
+    end
+
+    calibrationWindow.errorMsg = ""
+    calibrationWindow.itemName = result.name
+    calibrationWindow.measuredPeak = result.peak
+    calibrationWindow.measuredLUFS = result.lufs
+    calibrationWindow.calculatedOffset = result.offset
+end
+
+-- Saves or updates the profile with calibration data
+local function saveCalibrationToProfile()
+    local offset = calibrationWindow.calculatedOffset
+    local peak = math.floor(calibrationWindow.measuredPeak + 0.5)  -- Use measured peak, rounded
+
+    if calibrationWindow.selectedProfileIdx > 0 then
+        -- Update existing profile
+        local profile = normProfiles[calibrationWindow.selectedProfileIdx]
+        profile.offset = offset
+        profile.defaultPeak = peak
+        profile.lufsSegmentSize = calibrationWindow.segmentSize
+        profile.lufsPercentile = calibrationWindow.percentile
+        profile.lufsThreshold = calibrationWindow.threshold
+    else
+        -- Create new profile
+        local newName = calibrationWindow.newProfileName:match("^%s*(.-)%s*$")  -- trim
+        table.insert(normProfiles, {
+            name = newName,
+            offset = offset,
+            defaultPeak = peak,
+            lufsSegmentSize = calibrationWindow.segmentSize,
+            lufsPercentile = calibrationWindow.percentile,
+            lufsThreshold = calibrationWindow.threshold,
+        })
+    end
+
+    -- Save to INI
+    saveSharedNormalizationSettings()
 end
 
 local function getNextAvailableLane(track)
@@ -3385,16 +3669,27 @@ local function splitAllItemsAtRegions(regions, targetLanes, singleTrack)
     r.UpdateArrange()
 end
 
-local function normalizeTrack(track, normalizationType, targetValue, regions, targetLane)
+normalizeTrack = function(track, normalizationType, targetValue, regions, targetLane, profile)
     if not validTrack(track) then return false end
-    
+
     -- normalizationType: "LUFS", "Peak", or "RMS"
     -- targetValue: LUFS value for LUFS, dB for Peak/RMS
     -- targetLane: optional - if provided, use this lane instead of finding highest
-    
+    -- profile: optional - normalization profile for LUFS settings
+
+    -- Build LUFS settings from profile (or use defaults)
+    local lufsSettings = nil
+    if profile and profile.lufsSegmentSize then
+        lufsSettings = {
+            segmentSize = profile.lufsSegmentSize,
+            percentile = profile.lufsPercentile,
+            threshold = profile.lufsThreshold
+        }
+    end
+
     -- Get item count at start (needed for take reset even when targetLane is provided)
     local itemCount = r.CountTrackMediaItems(track)
-    
+
     -- Find highest lane on this track if not provided
     if not targetLane then
         targetLane = 0
@@ -3404,9 +3699,9 @@ local function normalizeTrack(track, normalizationType, targetValue, regions, ta
             targetLane = math.max(targetLane, lane)
         end
     end
-    
+
     log(string.format("  Working on lane %d\n", targetLane))
-    
+
     -- Activate the new lane
     log(string.format("  Activating lane %d\n", targetLane))
     setOnlyLaneActive(track, targetLane)
@@ -3414,21 +3709,24 @@ local function normalizeTrack(track, normalizationType, targetValue, regions, ta
     -- Verify lane is active
     local laneActive = r.GetMediaTrackInfo_Value(track, "C_LANEPLAYS:" .. targetLane)
     log(string.format("  Lane %d active status: %d\n", targetLane, laneActive))
-    
-    -- Reset all takes to 0dB volume BEFORE measuring/normalizing
-    log("  Resetting all takes to 0dB volume...\n")
+
+    -- Reset all item gains AND take volumes to 0dB BEFORE measuring/normalizing
+    log("  Resetting all item gains and take volumes to 0dB...\n")
     for i = 0, itemCount - 1 do
         local item = r.GetTrackMediaItem(track, i)
+        -- Reset Item Gain (D_VOL on item)
+        r.SetMediaItemInfo_Value(item, "D_VOL", 1.0)  -- 1.0 = 0dB
+        -- Reset Take Volume (D_VOL on take)
         local take = r.GetActiveTake(item)
         if take then
             r.SetMediaItemTakeInfo_Value(take, "D_VOL", 1.0)  -- 1.0 = 0dB
         end
     end
-    
+
     -- Step 6: Normalize per region (WITHOUT splitting!)
     if settings.processPerRegion and #regions > 0 then
         log(string.format("  Processing %d regions\n", #regions))
-        
+
         -- Normalize per region (GROUP-BASED: all items in region get same gain)
         for ridx, region in ipairs(regions) do
             local items = getItemsInTimeRange(track, region.pos, region.fin, targetLane)
@@ -3439,7 +3737,7 @@ local function normalizeTrack(track, normalizationType, targetValue, regions, ta
                 elseif normalizationType == "RMS" then
                     normalizePeakOrRMSGroup(items, targetValue, true)
                 else  -- LUFS
-                    normalizeLUFSGroup(items, targetValue)
+                    normalizeLUFSGroup(items, targetValue, lufsSettings)
                 end
             end
         end
@@ -3452,7 +3750,7 @@ local function normalizeTrack(track, normalizationType, targetValue, regions, ta
         elseif normalizationType == "RMS" then
             normalizePeakOrRMSGroup(allItems, targetValue, true)
         else  -- LUFS
-            normalizeLUFSGroup(allItems, targetValue)
+            normalizeLUFSGroup(allItems, targetValue, lufsSettings)
         end
     end
     
@@ -3524,12 +3822,23 @@ local function normalizeTrack(track, normalizationType, targetValue, regions, ta
     return true
 end
 
-local function normalizeTrackDirect(track, normalizationType, targetValue, regions)
+normalizeTrackDirect = function(track, normalizationType, targetValue, regions, profile)
     if not validTrack(track) then return false end
-    
+
     -- normalizationType: "LUFS", "Peak", or "RMS"
     -- targetValue: LUFS value for LUFS, dB for Peak/RMS
-    
+    -- profile: optional - normalization profile for LUFS settings
+
+    -- Build LUFS settings from profile (or use defaults)
+    local lufsSettings = nil
+    if profile and profile.lufsSegmentSize then
+        lufsSettings = {
+            segmentSize = profile.lufsSegmentSize,
+            percentile = profile.lufsPercentile,
+            threshold = profile.lufsThreshold
+        }
+    end
+
     log("  Direct normalization (no new lane)\n")
     
     -- Find active lane
@@ -3555,17 +3864,20 @@ local function normalizeTrackDirect(track, normalizationType, targetValue, regio
     end
     
     log(string.format("  Found %d items on active lane\n", #allItems))
-    
-    -- Reset all takes to 0dB volume BEFORE measuring/normalizing
-    log("  Resetting all takes to 0dB volume...\n")
+
+    -- Reset all item gains AND take volumes to 0dB BEFORE measuring/normalizing
+    log("  Resetting all item gains and take volumes to 0dB...\n")
     for i = 0, itemCount - 1 do
         local item = r.GetTrackMediaItem(track, i)
+        -- Reset Item Gain (D_VOL on item)
+        r.SetMediaItemInfo_Value(item, "D_VOL", 1.0)  -- 1.0 = 0dB
+        -- Reset Take Volume (D_VOL on take)
         local take = r.GetActiveTake(item)
         if take then
             r.SetMediaItemTakeInfo_Value(take, "D_VOL", 1.0)  -- 1.0 = 0dB
         end
     end
-    
+
     if settings.processPerRegion and #regions > 0 then
         log(string.format("  Processing %d regions\n", #regions))
         
@@ -3579,7 +3891,7 @@ local function normalizeTrackDirect(track, normalizationType, targetValue, regio
                 elseif normalizationType == "RMS" then
                     normalizePeakOrRMSGroup(items, targetValue, true)
                 else  -- LUFS
-                    normalizeLUFSGroup(items, targetValue)
+                    normalizeLUFSGroup(items, targetValue, lufsSettings)
                 end
             end
         end
@@ -3651,10 +3963,10 @@ local function normalizeTrackDirect(track, normalizationType, targetValue, regio
         elseif normalizationType == "RMS" then
             normalizePeakOrRMSGroup(allItems, targetValue, true)
         else  -- LUFS
-            normalizeLUFSGroup(allItems, targetValue)
+            normalizeLUFSGroup(allItems, targetValue, lufsSettings)
         end
     end
-    
+
     r.UpdateArrange()
     return true
 end
@@ -4029,8 +4341,8 @@ local function commitMappings()
 
             if normData and normData.profile ~= "-" then
                 -- Check if it's a special Peak/RMS profile or a regular LUFS profile
-                local normType, targetValue
-                
+                local normType, targetValue, usedProfile
+
                 if normData.profile == "Peak" then
                     normType = "Peak"
                     targetValue = normData.targetPeak
@@ -4047,17 +4359,18 @@ local function commitMappings()
                     if profile then
                         normType = "LUFS"
                         targetValue = calculateLUFS(normData.targetPeak, profile.offset)
+                        usedProfile = profile  -- Store for passing to normalizeTrack
                         log(string.format("\nNormalizing: %s\n", trackName))
-                        log(string.format("  Profile: %s, Peak: %.1f dB, LUFS: %.1f\n", 
+                        log(string.format("  Profile: %s, Peak: %.1f dB, LUFS: %.1f\n",
                             normData.profile, normData.targetPeak, targetValue))
                     end
                 end
-                
+
                 if normType and targetValue then
                     if settings.createNewLane then
                         -- Create new lane and normalize - use stored target lane
                         local targetLane = trackLanes[tr]  -- Get stored lane from duplication
-                        local success = normalizeTrack(tr, normType, targetValue, regions, targetLane)
+                        local success = normalizeTrack(tr, normType, targetValue, regions, targetLane, usedProfile)
                         if success then
                             normalizedCount = normalizedCount + 1
                             log("  - Success (new lane)\n")
@@ -4066,7 +4379,7 @@ local function commitMappings()
                         end
                     else
                         -- Direct normalization on existing items
-                        local success = normalizeTrackDirect(tr, normType, targetValue, regions)
+                        local success = normalizeTrackDirect(tr, normType, targetValue, regions, usedProfile)
                         if success then
                             normalizedCount = normalizedCount + 1
                             log("  - Success (direct)\n")
@@ -4164,6 +4477,21 @@ local function drawUI_body()
         settings.importMode = importVal
         importMode = importVal
         saveIni()
+
+        -- When switching from Import to Normalize-only, load tracks for normalize mode
+        if not importVal and normalizeMode and #tracks == 0 then
+            loadTracksWithItems()
+            if settings.autoMatchProfilesOnImport then
+                autoMatchProfilesDirect()
+            end
+        end
+
+        -- When enabling Import mode, rebuild mix targets
+        if importVal and #mixTargets == 0 then
+            rebuildMixTargets()
+            map = {}
+            normMap = {}
+        end
     end
 
     r.ImGui_SameLine(ctx)
@@ -4173,7 +4501,8 @@ local function drawUI_body()
         normalizeMode = normalizeVal
         saveIni()
 
-        if normalizeMode and not importMode and #tracks == 0 then
+        -- When enabling Normalize-only mode (Import already off), load tracks
+        if normalizeVal and not importMode and #tracks == 0 then
             loadTracksWithItems()
             if settings.autoMatchProfilesOnImport then
                 autoMatchProfilesDirect()
@@ -4190,11 +4519,11 @@ local function drawUI_body()
 
     -- Settings/Help right-aligned in header
     r.ImGui_SameLine(ctx, r.ImGui_GetWindowWidth(ctx) - 120)
-    if sec_button("Settings") then
+    if sec_button("Settings##header") then
         showSettings = true
     end
     r.ImGui_SameLine(ctx)
-    if sec_button("Help") then
+    if sec_button("Help##header") then
         showHelp = true
     end
 
@@ -4240,13 +4569,13 @@ local function drawUI_body()
     r.ImGui_Dummy(ctx, 8, 0)
     r.ImGui_SameLine(ctx)
 
-    if sec_button("Auto-match Tracks") then
+    if sec_button("Auto-match Tracks##import") then
         autosuggest()
     end
 
     if normalizeMode then
         r.ImGui_SameLine(ctx)
-        if sec_button("Auto-match Profiles") then
+        if sec_button("Auto-match Profiles##import") then
             autoMatchProfiles()
         end
     end
@@ -4255,7 +4584,7 @@ local function drawUI_body()
     r.ImGui_Dummy(ctx, 8, 0)
     r.ImGui_SameLine(ctx)
 
-    if sec_button("Import Markers") then
+    if sec_button("Import Markers##import") then
         if recPathRPP and recPathRPP ~= "" then
             importMarkersTempoPostCommit()
         else
@@ -4266,7 +4595,7 @@ local function drawUI_body()
     -- RPP path info (compact)
     if recPathRPP then
         r.ImGui_SameLine(ctx)
-        r.ImGui_TextColored(ctx, text_dim, "  RPP: " .. recPathRPP)
+        r.ImGui_TextColored(ctx, theme.text_dim, "  RPP: " .. recPathRPP)
     end
 
     r.ImGui_Separator(ctx)
@@ -4992,7 +5321,7 @@ local function drawUI_body()
         if settings.processPerRegion then
             local regions = scanRegions()
             r.ImGui_SameLine(ctx)
-            r.ImGui_TextColored(ctx, text_dim, string.format("(%d regions)", #regions))
+            r.ImGui_TextColored(ctx, theme.text_dim, string.format("(%d regions)", #regions))
             if #regions > 0 then
                 r.ImGui_SameLine(ctx)
                 changed, val = r.ImGui_Checkbox(ctx, "Delete gaps", settings.deleteBetweenRegions)
@@ -5015,9 +5344,9 @@ local function drawUI_body()
             end
         end
     end
-    r.ImGui_TextColored(ctx, text_dim, string.format("%d tracks", processCount))
+    r.ImGui_TextColored(ctx, theme.text_dim, string.format("%d tracks", processCount))
     r.ImGui_SameLine(ctx)
-    if sec_button("Preview") then
+    if sec_button("Preview##import") then
         previewMode = true
     end
 
@@ -5026,14 +5355,14 @@ local function drawUI_body()
     local closeW = r.ImGui_CalcTextSize(ctx, "Close") + 16
     local padding = r.ImGui_GetStyleVar(ctx, r.ImGui_StyleVar_ItemSpacing())
     r.ImGui_SameLine(ctx, r.ImGui_GetWindowWidth(ctx) - commitW - closeW - padding - r.ImGui_GetStyleVar(ctx, r.ImGui_StyleVar_WindowPadding()))
-    if r.ImGui_Button(ctx, "Commit") then
+    if r.ImGui_Button(ctx, "Commit##import") then
         commitMappings()
     end
     r.ImGui_SameLine(ctx)
-    if sec_button("Close") then
+    if sec_button("Close##import") then
         should_close = true
     end
-    
+
     if previewMode then
         r.ImGui_SetNextWindowSize(ctx, 600, 400, r.ImGui_Cond_FirstUseEver())
         local vis, open = r.ImGui_Begin(ctx, "Preview", true)
@@ -5097,20 +5426,10 @@ local function drawUI_body()
         end
         
         r.ImGui_SameLine(ctx)
-        if r.ImGui_Button(ctx, "Auto-match Profiles") then
+        if r.ImGui_Button(ctx, "Auto-match Profiles##norm") then
             autoMatchProfilesDirect()
         end
-        
-        r.ImGui_SameLine(ctx)
-        if r.ImGui_Button(ctx, "Settings") then
-            showSettings = true
-        end
-        
-        r.ImGui_SameLine(ctx)
-        if r.ImGui_Button(ctx, "Help") then
-            showHelp = true
-        end
-        
+
         r.ImGui_Separator(ctx)
         
         -- Bulk action section (Normalize-Only Mode)
@@ -5270,7 +5589,7 @@ local function drawUI_body()
         if settings.processPerRegion then
             local regions = scanRegions()
             r.ImGui_SameLine(ctx)
-            r.ImGui_TextColored(ctx, text_dim, string.format("(%d regions)", #regions))
+            r.ImGui_TextColored(ctx, theme.text_dim, string.format("(%d regions)", #regions))
             if #regions > 0 then
                 r.ImGui_SameLine(ctx)
                 changed, val = r.ImGui_Checkbox(ctx, "Delete gaps", settings.deleteBetweenRegions)
@@ -5288,20 +5607,173 @@ local function drawUI_body()
                 normCount = normCount + 1
             end
         end
-        r.ImGui_TextColored(ctx, text_dim, string.format("%d tracks | %d to normalize", #tracks, normCount))
+        r.ImGui_TextColored(ctx, theme.text_dim, string.format("%d tracks | %d to normalize", #tracks, normCount))
 
         local win_w = r.ImGui_GetWindowWidth(ctx)
         r.ImGui_SameLine(ctx, win_w - 170)
-        if r.ImGui_Button(ctx, "Normalize") then
+        if r.ImGui_Button(ctx, "Normalize##norm") then
             doNormalizeDirectly()
         end
         r.ImGui_SameLine(ctx)
-        if sec_button("Close") then
+        if sec_button("Close##norm") then
             should_close = true
         end
-    
+
     -- ===== END NORMALIZE-ONLY MODE =====
     end
+end
+
+-- ===== UI: CALIBRATION WINDOW =====
+local function drawCalibrationWindow()
+    if not calibrationWindow.open then return end
+
+    local windowFlags = r.ImGui_WindowFlags_AlwaysAutoResize()
+    r.ImGui_SetNextWindowPos(ctx, 400, 300, r.ImGui_Cond_FirstUseEver())
+
+    local visible, open = r.ImGui_Begin(ctx, "Calibrate Profile", true, windowFlags)
+
+    if visible then
+        -- Error State
+        if calibrationWindow.errorMsg ~= "" then
+            r.ImGui_TextColored(ctx, 0xFF6666FF, calibrationWindow.errorMsg)
+            r.ImGui_Spacing(ctx)
+            if r.ImGui_Button(ctx, "Close") then
+                calibrationWindow.open = false
+            end
+            r.ImGui_End(ctx)
+            return
+        end
+
+        -- Item Info
+        r.ImGui_Text(ctx, "Selected Item:")
+        r.ImGui_SameLine(ctx)
+        r.ImGui_TextColored(ctx, 0x66FF66FF, calibrationWindow.itemName)
+
+        r.ImGui_Separator(ctx)
+        r.ImGui_Spacing(ctx)
+
+        -- Measured Values (read-only display)
+        r.ImGui_Text(ctx, "Measured Values:")
+        r.ImGui_Text(ctx, string.format("  Peak:  %.1f dB", calibrationWindow.measuredPeak))
+        r.ImGui_Text(ctx, string.format("  LUFS:  %.1f dB", calibrationWindow.measuredLUFS))
+        r.ImGui_Text(ctx, string.format("  Offset: %d dB", calibrationWindow.calculatedOffset))
+
+        r.ImGui_Spacing(ctx)
+        r.ImGui_Separator(ctx)
+        r.ImGui_Spacing(ctx)
+
+        -- Measurement Settings Section
+        r.ImGui_Text(ctx, "Measurement Settings:")
+        r.ImGui_Spacing(ctx)
+
+        -- Segment Size
+        r.ImGui_SetNextItemWidth(ctx, 150)
+        local changed1, newSeg = r.ImGui_SliderDouble(ctx, "Segment Size (s)", calibrationWindow.segmentSize, 5.0, 30.0, "%.1f")
+        if changed1 then calibrationWindow.segmentSize = newSeg end
+
+        -- Percentile
+        r.ImGui_SetNextItemWidth(ctx, 150)
+        local changed2, newPct = r.ImGui_SliderInt(ctx, "Percentile (%)", calibrationWindow.percentile, 80, 99)
+        if changed2 then calibrationWindow.percentile = newPct end
+
+        -- Threshold
+        r.ImGui_SetNextItemWidth(ctx, 150)
+        local changed3, newThr = r.ImGui_SliderDouble(ctx, "Threshold (dB)", calibrationWindow.threshold, -60.0, -20.0, "%.0f")
+        if changed3 then calibrationWindow.threshold = newThr end
+
+        -- Re-measure button
+        r.ImGui_Spacing(ctx)
+        if r.ImGui_Button(ctx, "Re-measure") then
+            remeasureCalibration()
+        end
+
+        r.ImGui_Spacing(ctx)
+        r.ImGui_Separator(ctx)
+        r.ImGui_Spacing(ctx)
+
+        -- Profile Selection
+        r.ImGui_Text(ctx, "Save to Profile:")
+
+        -- Build dropdown items: "Create new..." + existing profiles (excluding Peak/RMS)
+        r.ImGui_SetNextItemWidth(ctx, 200)
+        local items = "Create new...\0"
+        local profileIndices = {0}  -- Maps combo index to normProfiles index
+        for i, p in ipairs(normProfiles) do
+            if p.name ~= "Peak" and p.name ~= "RMS" then
+                items = items .. p.name .. "\0"
+                table.insert(profileIndices, i)
+            end
+        end
+
+        local comboChanged, newIdx = r.ImGui_Combo(ctx, "##profileselect", calibrationWindow.selectedProfileIdx, items)
+        if comboChanged then
+            calibrationWindow.selectedProfileIdx = newIdx
+            if newIdx > 0 and profileIndices[newIdx + 1] then
+                local profile = normProfiles[profileIndices[newIdx + 1]]
+                calibrationWindow.newProfileName = profile.name
+                -- Load profile's measurement settings if available
+                if profile.lufsSegmentSize then
+                    calibrationWindow.segmentSize = profile.lufsSegmentSize
+                    calibrationWindow.percentile = profile.lufsPercentile
+                    calibrationWindow.threshold = profile.lufsThreshold
+                end
+            else
+                calibrationWindow.newProfileName = ""
+            end
+        end
+
+        -- Store the actual profile index for saving
+        if calibrationWindow.selectedProfileIdx > 0 then
+            calibrationWindow.actualProfileIdx = profileIndices[calibrationWindow.selectedProfileIdx + 1]
+        else
+            calibrationWindow.actualProfileIdx = 0
+        end
+
+        -- New profile name input (only if "Create new" selected)
+        if calibrationWindow.selectedProfileIdx == 0 then
+            r.ImGui_SetNextItemWidth(ctx, 200)
+            local nameChanged, newName = r.ImGui_InputText(ctx, "##newprofilename", calibrationWindow.newProfileName)
+            if nameChanged then
+                calibrationWindow.newProfileName = newName
+            end
+        end
+
+        r.ImGui_Spacing(ctx)
+        r.ImGui_Spacing(ctx)
+
+        -- Buttons
+        local canSave = calibrationWindow.selectedProfileIdx > 0 or
+                        (calibrationWindow.newProfileName ~= "" and calibrationWindow.newProfileName:match("%S"))
+
+        if not canSave then
+            r.ImGui_BeginDisabled(ctx)
+        end
+
+        if r.ImGui_Button(ctx, "Save Profile") then
+            -- Use actualProfileIdx for saving to correct profile
+            local origIdx = calibrationWindow.selectedProfileIdx
+            calibrationWindow.selectedProfileIdx = calibrationWindow.actualProfileIdx or 0
+            saveCalibrationToProfile()
+            calibrationWindow.selectedProfileIdx = origIdx
+            calibrationWindow.open = false
+        end
+
+        if not canSave then
+            r.ImGui_EndDisabled(ctx)
+        end
+
+        r.ImGui_SameLine(ctx)
+
+        if sec_button("Cancel") then
+            calibrationWindow.open = false
+        end
+    end
+
+    if not open then
+        calibrationWindow.open = false
+    end
+
+    r.ImGui_End(ctx)
 end
 
 -- ===== UI: SETTINGS WINDOW =====
@@ -5552,40 +6024,15 @@ local function drawSettingsWindow()
                 if r.ImGui_Button(ctx, "Save") then
                     saveIni()
                 end
-                
-                -- LUFS Settings
-                r.ImGui_Spacing(ctx)
-                r.ImGui_Separator(ctx)
-                r.ImGui_Spacing(ctx)
-                r.ImGui_Text(ctx, "LUFS Measurement Settings:")
-                
-                local changed, val = r.ImGui_SliderDouble(ctx, "Segment Size (seconds)", settings.lufsSegmentSize, 5.0, 30.0, "%.1f")
-                if changed then
-                    settings.lufsSegmentSize = val
-                    saveIni()
+
+                r.ImGui_SameLine(ctx)
+                if r.ImGui_Button(ctx, "Calibrate from Selection") then
+                    openCalibrationWindow()
                 end
                 if r.ImGui_IsItemHovered(ctx) then
-                    r.ImGui_SetTooltip(ctx, "Audio is split into segments of this length for LUFS measurement.\nDefault: 10s")
+                    r.ImGui_SetTooltip(ctx, "Select a perfectly leveled item in REAPER,\nthen click to create/update a profile from it.")
                 end
-                
-                changed, val = r.ImGui_SliderInt(ctx, "Percentile (%)", settings.lufsPercentile, 80, 99)
-                if changed then
-                    settings.lufsPercentile = val
-                    saveIni()
-                end
-                if r.ImGui_IsItemHovered(ctx) then
-                    r.ImGui_SetTooltip(ctx, "Which percentile of segments to use for normalization.\n90% = ignore loudest 10% of segments\nDefault: 90%")
-                end
-                
-                changed, val = r.ImGui_SliderDouble(ctx, "Segment Threshold (LUFS)", settings.lufsSegmentThreshold, -60.0, -20.0, "%.1f")
-                if changed then
-                    settings.lufsSegmentThreshold = val
-                    saveIni()
-                end
-                if r.ImGui_IsItemHovered(ctx) then
-                    r.ImGui_SetTooltip(ctx, "Segments quieter than this are ignored in LUFS measurement.\nPrevents silent parts from affecting normalization.\nDefault: -40 LUFS")
-                end
-                
+
                 r.ImGui_EndTabItem(ctx)
             end
             
@@ -6715,6 +7162,7 @@ local function loop()
     end
 
     drawSettingsWindow()
+    drawCalibrationWindow()
     drawHelpWindow()
 
     pop_theme()
@@ -6771,7 +7219,7 @@ do
             autoMatchProfilesDirect()
         end
     end
-    
+
     log("RAPID v" .. VERSION .. " loaded\n")
     log("Settings file: " .. getIniPath() .. "\n")
     log("Mode: " .. (importMode and "Import" or "") .. (importMode and normalizeMode and " + " or "") .. (normalizeMode and "Normalize" or "") .. "\n")

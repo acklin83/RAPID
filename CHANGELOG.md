@@ -4,6 +4,32 @@ Version history for RAPID.
 
 ---
 
+## v2.4 (February 2026)
+
+**LUFS Calibration System:**
+- New "Calibrate from Selection" button in Settings → Normalization tab
+- Select a perfectly leveled item in REAPER, click to measure Peak + LUFS
+- Create new profiles or update existing ones from reference tracks
+- Per-profile LUFS measurement settings (segment size, percentile, threshold)
+- Calibration window with editable target peak and re-measure functionality
+
+**Normalization Improvements:**
+- Calibration now correctly accounts for both Item Gain and Take Volume when measuring
+- Normalization resets both Item Gain and Take Volume to 0dB before processing
+- All normalization applied via Take Volume only (cleaner gain staging)
+- Peak/RMS measurement uses AudioAccessor for accurate item-level measurement
+
+**Bug Fixes:**
+- Fixed mode switching: tracks now properly reload when toggling Import/Normalize checkboxes
+
+**Architecture Changes:**
+- LUFS settings moved from global to per-profile storage
+- Extended INI profile format: `Name,Offset,Peak[,SegSize,Pct,Threshold]`
+- Removed global LUFS sliders from Settings UI (now profile-specific)
+- Backwards compatible: profiles without custom settings use defaults (10s, 90%, -40dB)
+
+---
+
 ## v2.3.1 (February 2026)
 
 **Performance:**

@@ -4,7 +4,7 @@
 
 **RAPID** (Recording Auto-Placement & Intelligent Dynamics) — a professional workflow automation tool for REAPER (DAW), written as a single Lua script.
 
-- **Current Version:** 2.3 (February 2026)
+- **Current Version:** 2.4 (February 2026)
 - **Developer:** Frank
 - **License:** MIT
 
@@ -50,6 +50,8 @@
 - `editingDestTrack` / `editingDestBuf` — state for inline track name editing
 - `selectedRows` — multi-select state (keyed by `"i_s"` format)
 - `deleteUnusedMode` — 0=keep unused, 1=delete unused (persisted in INI)
+- `calibrationWindow` — state for LUFS calibration popup (v2.4+)
+- `normProfiles` — array of profiles with optional per-profile LUFS settings (segmentSize, percentile, threshold)
 
 ## Three Workflows
 
@@ -93,6 +95,15 @@
 - Performance-critical: track operations were optimized from 20s → 2s (v1.5 refactor)
 - Import pipeline (`commitMappings()`) optimized in v2.3.1: cached chunk serialization, removed redundant `UpdateArrange()` calls, targeted peak building and media sweep to new tracks only, pre-computed normalization lookup
 
+## Normalization System (v2.4+)
+
+- **Gain Reset:** Before normalizing, both Item Gain (`D_VOL` on item) and Take Volume (`D_VOL` on take) are reset to 0dB
+- **Normalization via Take Volume:** All gain adjustments applied through Take Volume only (cleaner gain staging)
+- **AudioAccessor for Peak/RMS:** Uses `CreateTakeAudioAccessor` to measure actual item content (not source file)
+- **LUFS via CalculateNormalization:** Uses REAPER's native API with segment-based percentile measurement
+- **Per-profile LUFS settings:** Each profile can have custom segmentSize, percentile, threshold (stored in INI)
+- **Calibration workflow:** Select reference item → measure Peak+LUFS → create/update profile
+
 ## Resolved Issues
 
 **Fixed (v2.3): Imported RPP media items showed as "offline"**
@@ -114,6 +125,7 @@
 - v2.2 (Feb 2026): MixnoteStyle dark theme, compact UI layout, sec_button helper
 - v2.3 (Feb 2026): Editable track names, duplicate slot improvements, delete unused toggle, offline media fix, DrawList lock icon, help text rewrite
 - v2.3.1 (Feb 2026): Import speed optimization — cached chunks, removed redundant UI updates, targeted peak/media operations, deduplicated norm lookup
+- v2.4 (Feb 2026): LUFS Calibration System — measure reference items to create/update profiles, per-profile LUFS settings, gain reset before normalization
 
 ## Files
 

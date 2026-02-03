@@ -1,4 +1,4 @@
-# RAPID v2.1 - Recording Auto-Placement & Intelligent Dynamics
+# RAPID v2.4 - Recording Auto-Placement & Intelligent Dynamics
 
 A professional workflow tool for REAPER that combines automated track mapping with intelligent LUFS-based normalization.
 
@@ -48,6 +48,7 @@ Your mode selection is saved and restored automatically.
 - Instrument-specific profiles (Kick, Snare, Bass, etc.)
 - Segment-based measurement with percentile filtering
 - Threshold to ignore silent sections
+- **NEW: Calibration System** - Create profiles from reference tracks
 
 **Workflow Efficiency**
 - Multi-select rows for batch editing
@@ -100,8 +101,8 @@ See the built-in Help window (Help button in RAPID) for:
 
 ## VERSION
 
-Current Version: **2.1**  
-Last Updated: November 2025
+Current Version: **2.4**
+Last Updated: February 2026
 
 ---
 

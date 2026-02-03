@@ -2,30 +2,53 @@
 
 ---
 
-## Priority 0: Import Speed Optimization
+## Priority 0: LUFS Calibration System (v2.4)
 
-Optimize the `commitMappings()` import pipeline for faster execution, especially with many tracks/duplicates.
+Create and update normalization profiles by measuring manually-leveled reference tracks.
 
-### 0.1 Cache GetTrackStateChunk in duplicate loop (HIGH impact)
-- [ ] Cache `firstNew` chunk once before the per-duplicate loop instead of calling `GetTrackStateChunk` twice per duplicate
-- [ ] Eliminates ~2×(N-1) expensive chunk serializations per mapped track
+**Full specification:** See `LUFS-Calibration-Plan.md`
 
-### 0.2 Remove redundant UpdateArrange() in normalization (HIGH impact)
-- [ ] Remove ~7 `UpdateArrange()` calls inside per-track normalization loops
-- [ ] Already inside `PreventUIRefresh(1)` — keep only the final call after commit
+### 0.1 Architecture Changes
+- [ ] Remove global LUFS settings (`settings.lufsSegmentSize`, etc.)
+- [ ] Add `DEFAULT_LUFS_*` constants
+- [ ] Extend profile structure with optional measurement settings
+- [ ] Add `calibrationWindow` state
 
-### 0.3 Wrap minimize-all-tracks in PreventUIRefresh (easy win)
-- [ ] Post-commit track height minimization loop runs after `PreventUIRefresh(-1)` — wrap it in its own block
+### 0.2 Measurement Functions
+- [ ] Implement `measureSelectedItemLoudness(segmentSize, percentile, threshold)`
+- [ ] Implement `getProfileLufsSettings(profile)` helper
 
-### 0.4 Targeted peak building (MODERATE effort)
-- [ ] Collect newly-created items during Phase 1 and only call `PCM_Source_BuildPeaks` on those
-- [ ] Avoids iterating every item in the entire project
+### 0.3 Calibration Window
+- [ ] Implement `openCalibrationWindow()`
+- [ ] Implement `remeasureCalibration()`
+- [ ] Implement `drawCalibrationWindow()` (non-modal)
+- [ ] Implement `saveCalibrationToProfile()`
 
-### 0.5 Deduplicate normalization lookup (MODERATE effort)
-- [ ] Build a track→normalization lookup table once instead of running two identical O(N×M) nested loops
+### 0.4 UI Integration
+- [ ] Add "Calibrate from Selection" button to Settings → Normalization tab
+- [ ] Remove LUFS settings sliders from Settings window
+- [ ] Add `drawCalibrationWindow()` call to main loop
 
-### 0.6 Scope sweepProjectCopyRelink to new tracks only (MODERATE effort)
-- [ ] Limit media sweep to newly-created tracks instead of all project items
+### 0.5 Persistence
+- [ ] Update INI format: `Profile=Name,Offset,Peak[,SegSize,Pct,Thresh]`
+- [ ] Update `saveSharedNormalizationSettings()` for new format
+- [ ] Update `loadSharedNormalizationSettings()` with backwards compatibility
+
+### 0.6 Normalization Update
+- [ ] Update normalization logic to use per-profile measurement settings
+- [ ] Fallback to defaults when profile has no settings
+
+---
+
+## Priority 1: Import Speed Optimization (DONE in v2.3.1)
+
+~~Optimize the `commitMappings()` import pipeline for faster execution.~~
+
+- [x] Cache `firstNew` chunk once before the per-duplicate loop
+- [x] Remove redundant `UpdateArrange()` calls inside per-track normalization loops
+- [x] Targeted peak building (only new items)
+- [x] Deduplicate normalization lookup
+- [x] Scope `sweepProjectCopyRelink` to new tracks only
 
 ---
 

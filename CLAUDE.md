@@ -126,3 +126,4 @@
 | `CLAUDE.md` | This file — context for Claude Code |
 | `MixnoteStyle.md` | UI design system (dark theme reference) |
 | `roadmap.md` | Development roadmap |
+| `LUFS-Calibration-Plan.md` | Implementation plan for v2.4 calibration feature |

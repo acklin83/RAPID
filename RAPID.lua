@@ -254,23 +254,31 @@ local deleteUnusedMode = 0
 local tracks = {}          -- Array of {track, name} for normalize-only mode
 local normMapDirect = {}   -- Maps track index -> {profile, targetPeak} for normalize-only mode
 
--- UI state
-local previewMode = false
-local showSettings = false
-local showHelp = false
-local should_close = false
-local win_init_applied = false
+-- UI state (grouped to stay under Lua's 200 local variable limit)
+local uiFlags = {
+    preview = false,
+    settings = false,
+    help = false,
+    close = false,
+    winInit = false,
+}
 
--- Multi-select state (NEW for dev261125b)
+-- Multi-select & drag state
 local selectedRows = {}      -- Set of selected row IDs (format: "mixIdx_slotIdx")
-local lastClickedRow = nil   -- Last clicked row ID for Shift-range selection
-local dragSelectState = nil  -- Drag selection state for Sel column
-local dragLockState = nil    -- Drag state for Lock checkbox
-local dragKeepNameState = nil -- Drag state for Keep Name checkbox
-local dragKeepFXState = nil  -- Drag state for Keep FX checkbox
-local editingDestTrack = nil -- Edit key "i_s" currently being renamed (double-click)
-local editingDestBuf = ""    -- Buffer for the InputText
-local slotNameOverride = {}  -- slotNameOverride[i][s] = custom name for duplicate slots (s >= 2)
+local dragState = {
+    lastClicked = nil,   -- Last clicked row ID for Shift-range selection
+    sel = nil,       -- Drag selection state for Sel column
+    lock = nil,      -- Drag state for Lock checkbox
+    keepName = nil,  -- Drag state for Keep Name checkbox
+    keepFX = nil,    -- Drag state for Keep FX checkbox
+}
+
+-- Inline editing state
+local editState = {
+    track = nil,         -- Edit key "i_s" currently being renamed (double-click)
+    buf = "",            -- Buffer for the InputText
+    slotNames = {},      -- slotNames[i][s] = custom name for duplicate slots (s >= 2)
+}
 
 -- Calibration window state
 local calibrationWindow = {
@@ -291,7 +299,6 @@ local calibrationWindow = {
 }
 
 -- ===== MULTI-RPP IMPORT STATE (v2.5) =====
-local multiRppMode = false       -- Toggle between single/multi RPP mode
 local rppQueue = {}              -- Array of RPP entries for multi-import
 --[[
 rppQueue[i] = {
@@ -310,11 +317,11 @@ rppQueue[i] = {
 local multiMap = {}              -- multiMap[mixIdx][rppIdx] = trackIdxInRpp (or 0 = unmapped)
 local multiNormMap = {}          -- multiNormMap[mixIdx] = {profile, targetPeak}
 local multiRppSettings = {
+    enabled = false,              -- Toggle between single/multi RPP mode (was multiRppMode)
     gapInMeasures = 2,            -- Gap between RPPs in measures (default: 2)
     createRegions = true,         -- Create region per RPP
     importMarkers = true,         -- Import markers from all RPPs
 }
-local dragRppIdx = nil            -- Drag source index for queue reordering
 
 -- Caches
 local hasKids = setmetatable({}, {__mode="k"})
@@ -542,7 +549,7 @@ local function importMarkersTempoPostCommit()
     log("Closing script - please restart manually after project reload.\n")
     
     -- Set flag to close script
-    should_close = true
+    uiFlags.close = true
     
     -- Reload project (script will close immediately after)
     r.Main_openProject(cur_path)
@@ -2652,7 +2659,7 @@ local function commitMultiRpp()
     end
 
     r.Undo_EndBlock("RAPID v" .. VERSION .. ": Multi-RPP Import", -1)
-    should_close = true
+    uiFlags.close = true
 end
 
 -- ===== APPLY LAST MAP =====
@@ -4982,7 +4989,7 @@ local function commitMappings()
         local firstEntry = recSources[op.recIdxs[1]]
 
         -- Multi-RPP: Calculate time offset from measure offset
-        if multiRppMode and firstEntry.rppMeasureOffset and firstEntry.rppMeasureOffset > 0 then
+        if multiRppSettings.enabled and firstEntry.rppMeasureOffset and firstEntry.rppMeasureOffset > 0 then
             local rppIdx = firstEntry.rppIndex or 1
             local rpp = rppQueue[rppIdx]
             if rpp then
@@ -4999,8 +5006,8 @@ local function commitMappings()
         local firstKeepName = (keepMap[mixIdx][firstOrigSlot] == true)
         local firstKeepFX = (fxMap[mixIdx][firstOrigSlot] == true)
         local firstName
-        if slotNameOverride[mixIdx] and slotNameOverride[mixIdx][firstOrigSlot] then
-            firstName = slotNameOverride[mixIdx][firstOrigSlot]
+        if editState.slotNames[mixIdx] and editState.slotNames[mixIdx][firstOrigSlot] then
+            firstName = editState.slotNames[mixIdx][firstOrigSlot]
         elseif firstKeepName then
             firstName = firstEntry.name or mixName
         else
@@ -5041,7 +5048,7 @@ local function commitMappings()
             local entry = recSources[op.recIdxs[s]]
 
             -- Multi-RPP: Calculate time offset for this duplicate
-            if multiRppMode and entry.rppMeasureOffset and entry.rppMeasureOffset > 0 then
+            if multiRppSettings.enabled and entry.rppMeasureOffset and entry.rppMeasureOffset > 0 then
                 local rppIdx = entry.rppIndex or 1
                 local rpp = rppQueue[rppIdx]
                 if rpp then
@@ -5057,8 +5064,8 @@ local function commitMappings()
             local slotName
 
             -- Check for user-defined name override first
-            if slotNameOverride[mixIdx] and slotNameOverride[mixIdx][origSlot] then
-                slotName = slotNameOverride[mixIdx][origSlot]
+            if editState.slotNames[mixIdx] and editState.slotNames[mixIdx][origSlot] then
+                slotName = editState.slotNames[mixIdx][origSlot]
             elseif slotKeepName then
                 slotName = entry.name or (mixName .. " " .. s)
             else
@@ -5443,7 +5450,7 @@ local function commitMappings()
     r.TrackList_AdjustWindows(false)
 
     -- Multi-RPP: Write merged tempo/marker section
-    if multiRppMode and #rppQueue > 1 then
+    if multiRppSettings.enabled and #rppQueue > 1 then
         writeMultiRppTempoSection()
         -- Reload project to apply tempo changes
         local _, cur_path = r.EnumProjects(-1, "")
@@ -5457,7 +5464,7 @@ local function commitMappings()
 
     r.Undo_EndBlock("RAPID v" .. VERSION .. ": Commit", -1)
 
-    should_close = true
+    uiFlags.close = true
 end
 
 -- ===== UI: MAIN WINDOW =====
@@ -5519,11 +5526,11 @@ local function drawUI_body()
     -- Settings/Help right-aligned in header
     r.ImGui_SameLine(ctx, r.ImGui_GetWindowWidth(ctx) - 120)
     if sec_button("Settings##header") then
-        showSettings = true
+        uiFlags.settings = true
     end
     r.ImGui_SameLine(ctx)
     if sec_button("Help##header") then
-        showHelp = true
+        uiFlags.help = true
     end
 
     r.ImGui_Separator(ctx)
@@ -5532,7 +5539,7 @@ local function drawUI_body()
     if importMode then
 
     -- Toolbar row 1: Load sources + Auto-match + Multi-RPP toggle
-    if not multiRppMode then
+    if not multiRppSettings.enabled then
         -- Single RPP mode
         if r.ImGui_Button(ctx, "Load .RPP") then
             local ok, p = r.GetUserFileNameForRead("", "Select Recording .RPP", ".rpp")
@@ -5587,9 +5594,9 @@ local function drawUI_body()
     r.ImGui_SameLine(ctx)
 
     -- Multi-RPP toggle
-    local multiChanged, multiVal = r.ImGui_Checkbox(ctx, "Multi-RPP", multiRppMode)
+    local multiChanged, multiVal = r.ImGui_Checkbox(ctx, "Multi-RPP", multiRppSettings.enabled)
     if multiChanged then
-        multiRppMode = multiVal
+        multiRppSettings.enabled = multiVal
         if not multiVal then
             -- Switching back to single mode: use first queued RPP or clear
             if #rppQueue > 0 then
@@ -5608,7 +5615,7 @@ local function drawUI_body()
         end
     end
 
-    if not multiRppMode then
+    if not multiRppSettings.enabled then
         r.ImGui_SameLine(ctx)
         if r.ImGui_Button(ctx, "Load audio files") then
             local before = #recSources
@@ -5642,7 +5649,7 @@ local function drawUI_body()
     end
 
     -- RPP path info (single mode) or queue info (multi mode)
-    if not multiRppMode then
+    if not multiRppSettings.enabled then
         if recPathRPP then
             r.ImGui_SameLine(ctx)
             r.ImGui_TextColored(ctx, theme.text_dim, "  RPP: " .. recPathRPP)
@@ -5655,7 +5662,7 @@ local function drawUI_body()
     r.ImGui_Separator(ctx)
 
     -- ===== MULTI-RPP QUEUE PANEL =====
-    if multiRppMode and #rppQueue > 0 then
+    if multiRppSettings.enabled and #rppQueue > 0 then
         -- Collapsible queue panel
         if r.ImGui_CollapsingHeader(ctx, "RPP Queue##multirpp", r.ImGui_TreeNodeFlags_DefaultOpen()) then
             -- Settings row
@@ -5781,7 +5788,7 @@ local function drawUI_body()
                   r.ImGui_TableFlags_Resizable() | r.ImGui_TableFlags_ScrollY()
 
     -- ===== MULTI-RPP COLUMN MAPPING TABLE =====
-    if multiRppMode and #rppQueue > 0 then
+    if multiRppSettings.enabled and #rppQueue > 0 then
 
     -- Columns: [Lock] [Template] [RPP1] [RPP2] ... [RPPn] [Normalize?] [Peak?]
     local numRpps = #rppQueue
@@ -6181,14 +6188,14 @@ local function drawUI_body()
                 
                 -- Drag-state selection (like in Stem Manager) - only when hovering
                 if r.ImGui_IsItemHovered(ctx, r.ImGui_HoveredFlags_AllowWhenBlockedByActiveItem()) then
-                    if dragSelectState == nil and r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Left()) then
+                    if dragState.sel == nil and r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Left()) then
                         -- Start drag: toggle state
-                        dragSelectState = not isSelected
-                        selectedRows[rowID] = dragSelectState or nil
-                        lastClickedRow = rowID
-                    elseif dragSelectState ~= nil and dragSelectState ~= isSelected then
+                        dragState.sel = not isSelected
+                        selectedRows[rowID] = dragState.sel or nil
+                        dragState.lastClicked = rowID
+                    elseif dragState.sel ~= nil and dragState.sel ~= isSelected then
                         -- Dragging and this row has different state - apply drag state
-                        selectedRows[rowID] = dragSelectState or nil
+                        selectedRows[rowID] = dragState.sel or nil
                     end
                 end
                 
@@ -6196,7 +6203,7 @@ local function drawUI_body()
                 if selectChanged then
                     local shiftDown = r.ImGui_IsKeyDown(ctx, r.ImGui_Key_LeftShift()) or r.ImGui_IsKeyDown(ctx, r.ImGui_Key_RightShift())
                     
-                    if shiftDown and lastClickedRow and lastClickedRow ~= rowID then
+                    if shiftDown and dragState.lastClicked and dragState.lastClicked ~= rowID then
                         -- Range select
                         local allRowIDs = {}
                         for ti = 1, #mixTargets do
@@ -6208,7 +6215,7 @@ local function drawUI_body()
                         
                         local startIdx, endIdx = nil, nil
                         for idx, id in ipairs(allRowIDs) do
-                            if id == lastClickedRow then startIdx = idx end
+                            if id == dragState.lastClicked then startIdx = idx end
                             if id == rowID then endIdx = idx end
                         end
                         
@@ -6220,13 +6227,13 @@ local function drawUI_body()
                             end
                         end
                     else
-                        -- Single toggle was already handled by dragSelectState
-                        if dragSelectState == nil then
+                        -- Single toggle was already handled by dragState.sel
+                        if dragState.sel == nil then
                             selectedRows[rowID] = selectValue or nil
                         end
                     end
                     
-                    lastClickedRow = rowID
+                    dragState.lastClicked = rowID
                 end
                 
                 -- Column 1: Color swatch
@@ -6251,15 +6258,15 @@ local function drawUI_body()
 
                     -- Drag-state for Lock checkbox
                     if r.ImGui_IsItemHovered(ctx, r.ImGui_HoveredFlags_AllowWhenBlockedByActiveItem()) then
-                        if dragLockState == nil and r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Left()) then
-                            dragLockState = not checked
-                            protectedSet[name] = dragLockState or nil
-                        elseif dragLockState ~= nil and dragLockState ~= checked then
-                            protectedSet[name] = dragLockState or nil
+                        if dragState.lock == nil and r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Left()) then
+                            dragState.lock = not checked
+                            protectedSet[name] = dragState.lock or nil
+                        elseif dragState.lock ~= nil and dragState.lock ~= checked then
+                            protectedSet[name] = dragState.lock or nil
                         end
                     end
 
-                    if ch and dragLockState == nil then
+                    if ch and dragState.lock == nil then
                         protectedSet[name] = nv or nil
                         saveProtected()
                     end
@@ -6273,24 +6280,24 @@ local function drawUI_body()
                 if s == 1 then
                     slotDisplayName = name
                 else
-                    slotDisplayName = (slotNameOverride[i] and slotNameOverride[i][s]) or name
+                    slotDisplayName = (editState.slotNames[i] and editState.slotNames[i][s]) or name
                 end
-                if editingDestTrack == editKey then
+                if editState.track == editKey then
                     -- Editing mode: InputText (full width)
                     r.ImGui_SetNextItemWidth(ctx, -1)
-                    local changed, newBuf = r.ImGui_InputText(ctx, "##destName_" .. globalRowID, editingDestBuf, r.ImGui_InputTextFlags_AutoSelectAll())
-                    editingDestBuf = newBuf
+                    local changed, newBuf = r.ImGui_InputText(ctx, "##destName_" .. globalRowID, editState.buf, r.ImGui_InputTextFlags_AutoSelectAll())
+                    editState.buf = newBuf
                     -- Auto-focus on first frame
                     if not r.ImGui_IsItemActive(ctx) and not r.ImGui_IsItemDeactivated(ctx) then
                         r.ImGui_SetKeyboardFocusHere(ctx, -1)
                     end
                     if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
                         -- Escape: cancel without saving
-                        editingDestTrack = nil
-                        editingDestBuf = ""
+                        editState.track = nil
+                        editState.buf = ""
                     elseif r.ImGui_IsItemDeactivated(ctx) then
                         -- Enter, Tab, or click away: apply
-                        local trimmed = (editingDestBuf or ""):gsub("^%s+", ""):gsub("%s+$", "")
+                        local trimmed = (editState.buf or ""):gsub("^%s+", ""):gsub("%s+$", "")
                         if trimmed ~= "" then
                             if s == 1 then
                                 -- Slot 1: rename the actual REAPER track
@@ -6298,12 +6305,12 @@ local function drawUI_body()
                                 nameCache[tr] = trimmed
                             else
                                 -- Slot 2+: store as override (track created at commit)
-                                slotNameOverride[i] = slotNameOverride[i] or {}
-                                slotNameOverride[i][s] = trimmed
+                                editState.slotNames[i] = editState.slotNames[i] or {}
+                                editState.slotNames[i][s] = trimmed
                             end
                         end
-                        editingDestTrack = nil
-                        editingDestBuf = ""
+                        editState.track = nil
+                        editState.buf = ""
                     end
                 else
                     -- Display mode: Selectable (full cell width), double-click to edit
@@ -6316,8 +6323,8 @@ local function drawUI_body()
                     r.ImGui_SetNextItemWidth(ctx, -1)
                     if r.ImGui_Selectable(ctx, displayLabel .. "##dest_" .. globalRowID, false, r.ImGui_SelectableFlags_AllowDoubleClick()) then
                         if r.ImGui_IsMouseDoubleClicked(ctx, r.ImGui_MouseButton_Left()) then
-                            editingDestTrack = editKey
-                            editingDestBuf = slotDisplayName
+                            editState.track = editKey
+                            editState.buf = slotDisplayName
                         end
                     end
                     if r.ImGui_IsItemHovered(ctx) then
@@ -6407,16 +6414,16 @@ local function drawUI_body()
                 
                 -- Drag-state for Keep Name checkbox
                 if r.ImGui_IsItemHovered(ctx, r.ImGui_HoveredFlags_AllowWhenBlockedByActiveItem()) then
-                    if dragKeepNameState == nil and r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Left()) then
-                        dragKeepNameState = not kn
-                        keepMap[i][s] = dragKeepNameState or nil
-                    elseif dragKeepNameState ~= nil and dragKeepNameState ~= kn then
-                        keepMap[i][s] = dragKeepNameState or nil
+                    if dragState.keepName == nil and r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Left()) then
+                        dragState.keepName = not kn
+                        keepMap[i][s] = dragState.keepName or nil
+                    elseif dragState.keepName ~= nil and dragState.keepName ~= kn then
+                        keepMap[i][s] = dragState.keepName or nil
                     end
                 end
                 
                 if chkn then 
-                    if dragKeepNameState == nil then
+                    if dragState.keepName == nil then
                         -- Apply to all selected rows if multi-select active
                         local hasMultipleSelected = false
                         for _ in pairs(selectedRows) do hasMultipleSelected = true; break end
@@ -6446,16 +6453,16 @@ local function drawUI_body()
                 
                 -- Drag-state for Keep FX checkbox
                 if r.ImGui_IsItemHovered(ctx, r.ImGui_HoveredFlags_AllowWhenBlockedByActiveItem()) then
-                    if dragKeepFXState == nil and r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Left()) then
-                        dragKeepFXState = not kfx
-                        fxMap[i][s] = dragKeepFXState or nil
-                    elseif dragKeepFXState ~= nil and dragKeepFXState ~= kfx then
-                        fxMap[i][s] = dragKeepFXState or nil
+                    if dragState.keepFX == nil and r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Left()) then
+                        dragState.keepFX = not kfx
+                        fxMap[i][s] = dragState.keepFX or nil
+                    elseif dragState.keepFX ~= nil and dragState.keepFX ~= kfx then
+                        fxMap[i][s] = dragState.keepFX or nil
                     end
                 end
                 
                 if chkfx then 
-                    if dragKeepFXState == nil then
+                    if dragState.keepFX == nil then
                         -- Apply to all selected rows if multi-select active
                         local hasMultipleSelected = false
                         for _ in pairs(selectedRows) do hasMultipleSelected = true; break end
@@ -6582,9 +6589,9 @@ local function drawUI_body()
                     r.ImGui_SameLine(ctx)
                     if r.ImGui_Button(ctx, "-##del_" .. globalRowID) then
                         table.remove(map[i], s)
-                        -- Clean up slotNameOverride
-                        if slotNameOverride[i] then
-                            slotNameOverride[i][s] = nil
+                        -- Clean up editState.slotNames
+                        if editState.slotNames[i] then
+                            editState.slotNames[i][s] = nil
                         end
                         -- Clean up normMap
                         if normMap[i] then
@@ -6602,16 +6609,16 @@ local function drawUI_body()
     
     -- Clear drag states when mouse is released (drag complete)
     if r.ImGui_IsMouseReleased(ctx, r.ImGui_MouseButton_Left()) then
-        if dragSelectState ~= nil then dragSelectState = nil end
-        if dragLockState ~= nil then 
-            dragLockState = nil 
+        if dragState.sel ~= nil then dragState.sel = nil end
+        if dragState.lock ~= nil then 
+            dragState.lock = nil 
             saveProtected()  -- Save when drag ends
         end
-        if dragKeepNameState ~= nil then dragKeepNameState = nil end
-        if dragKeepFXState ~= nil then dragKeepFXState = nil end
+        if dragState.keepName ~= nil then dragState.keepName = nil end
+        if dragState.keepFX ~= nil then dragState.keepFX = nil end
     end
 
-    end  -- end of if multiRppMode ... else (single-RPP table)
+    end  -- end of if multiRppSettings.enabled ... else (single-RPP table)
 
     r.ImGui_Separator(ctx)
 
@@ -6670,7 +6677,7 @@ local function drawUI_body()
     r.ImGui_TextColored(ctx, theme.text_dim, string.format("%d tracks", processCount))
     r.ImGui_SameLine(ctx)
     if sec_button("Preview##import") then
-        previewMode = true
+        uiFlags.preview = true
     end
 
     local win_w = r.ImGui_GetContentRegionAvail(ctx)
@@ -6679,7 +6686,7 @@ local function drawUI_body()
     local padding = r.ImGui_GetStyleVar(ctx, r.ImGui_StyleVar_ItemSpacing())
     r.ImGui_SameLine(ctx, r.ImGui_GetWindowWidth(ctx) - commitW - closeW - padding - r.ImGui_GetStyleVar(ctx, r.ImGui_StyleVar_WindowPadding()))
     if r.ImGui_Button(ctx, "Commit##import") then
-        if multiRppMode and #rppQueue > 0 then
+        if multiRppSettings.enabled and #rppQueue > 0 then
             commitMultiRpp()
         else
             commitMappings()
@@ -6687,10 +6694,10 @@ local function drawUI_body()
     end
     r.ImGui_SameLine(ctx)
     if sec_button("Close##import") then
-        should_close = true
+        uiFlags.close = true
     end
 
-    if previewMode then
+    if uiFlags.preview then
         r.ImGui_SetNextWindowSize(ctx, 600, 400, r.ImGui_Cond_FirstUseEver())
         local vis, open = r.ImGui_Begin(ctx, "Preview", true)
         
@@ -6735,7 +6742,7 @@ local function drawUI_body()
         end
         
         r.ImGui_End(ctx)
-        if not open then previewMode = false end
+        if not open then uiFlags.preview = false end
     end
     
     -- ===== END IMPORT MODE =====
@@ -6943,7 +6950,7 @@ local function drawUI_body()
         end
         r.ImGui_SameLine(ctx)
         if sec_button("Close##norm") then
-            should_close = true
+            uiFlags.close = true
         end
 
     -- ===== END NORMALIZE-ONLY MODE =====
@@ -7105,7 +7112,7 @@ end
 
 -- ===== UI: SETTINGS WINDOW =====
 local function drawSettingsWindow()
-    if not showSettings then return end
+    if not uiFlags.settings then return end
     
     r.ImGui_SetNextWindowSize(ctx, 700, 600, r.ImGui_Cond_FirstUseEver())
     local visible, open = r.ImGui_Begin(ctx, "Settings", true)
@@ -7446,12 +7453,12 @@ local function drawSettingsWindow()
         r.ImGui_End(ctx)
     end
     
-    if not open then showSettings = false end
+    if not open then uiFlags.settings = false end
 end
 
 -- ===== UI: HELP WINDOW =====
 local function drawHelpWindow()
-    if not showHelp then return end
+    if not uiFlags.help then return end
     
     r.ImGui_SetNextWindowSize(ctx, 950, 750, r.ImGui_Cond_FirstUseEver())
     local visible, open = r.ImGui_Begin(ctx, "Help - RAPID v" .. VERSION, true)
@@ -8539,7 +8546,7 @@ For support or feature requests, check the REAPER forums.
         r.ImGui_End(ctx)
     end
     
-    if not open then showHelp = false end
+    if not open then uiFlags.help = false end
 end
 
 
@@ -8547,7 +8554,7 @@ end
 local function loop()
     apply_theme()
 
-    if not win_init_applied then
+    if not uiFlags.winInit then
         local x, y, w, h = loadWinGeom()
         if x and y and w and h then
             r.ImGui_SetNextWindowPos(ctx, x, y, r.ImGui_Cond_Once())
@@ -8555,7 +8562,7 @@ local function loop()
         else
             r.ImGui_SetNextWindowSize(ctx, 1200, 800, r.ImGui_Cond_FirstUseEver())
         end
-        win_init_applied = true
+        uiFlags.winInit = true
     end
 
     local visible, open = r.ImGui_Begin(ctx, WINDOW_TITLE, true, r.ImGui_WindowFlags_NoSavedSettings())
@@ -8583,7 +8590,7 @@ local function loop()
 
     pop_theme()
 
-    if should_close or (not open) then return end
+    if uiFlags.close or (not open) then return end
 
     r.defer(loop)
 end

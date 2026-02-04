@@ -44,6 +44,7 @@
 
 ### Key Data Structures
 
+- `recPath` — source RPP paths: `.rpp` (file path), `.dir` (directory), `.regionCount` (region count)
 - `recSources` — recording tracks from source RPP
 - `mixTargets` — template tracks in current project
 - `map` — track mapping assignments (multi-slot: `map[i] = {srcIdx1, srcIdx2, ...}`)
@@ -61,6 +62,8 @@
 - `rppQueue` — array of RPP entries: `{path, name, rppText, tracks[], baseTempo, tempoMap[], markers[], lengthInMeasures, startMeasure}`
 - `multiMap` — mapping: `multiMap[mixIdx][rppIdx] = trackIdxInRpp` (0 = unmapped)
 - `multiNormMap` — normalization per template track: `multiNormMap[mixIdx] = {profile, targetPeak}`
+- `trackCache` — weak caches: `.kids` (folder has children), `.color` (effective track color)
+- `nameCache` — weak cache for track names
 
 ## Four Workflows
 

@@ -4,6 +4,33 @@ Version history for RAPID.
 
 ---
 
+## v2.5 (February 2026)
+
+**Multi-RPP Import:**
+- Import multiple RPP files into the same mix template
+- Drag-and-drop reordering of RPP queue
+- Per-RPP regions created automatically (named from filename)
+- Tempo/time-signature changes merged from all RPPs (full fidelity via plaintext import)
+- Markers imported with correct measure offsets
+- Configurable gap between RPPs (in measures, default: 2)
+- JS_ReaScriptAPI multi-file dialog support for loading multiple RPPs at once
+
+**Multi-RPP Track Handling:**
+- Column-based UI: one dropdown column per loaded RPP, horizontal scrolling for many RPPs
+- Per-column and all-columns auto-matching
+- Track consolidation: import all RPP tracks → shift items + envelopes to measure offset → merge onto single master track
+- FX/Sends/routing copied from template to consolidated tracks
+- Normalization per region uses auto-created RPP regions
+
+**Architecture:**
+- Two-phase tempo: API tempo for positioning, plaintext overwrite for full fidelity (API loses Shape/Tension)
+- All calculations measure-based (not time-based — time is unreliable with changing tempos)
+- `commitMultiRpp()` pipeline: API tempo → regions → markers → track import/shift/consolidate → normalize → plaintext tempo → reload
+- New state: `multiRppMode`, `rppQueue`, `multiMap`, `multiNormMap`, `multiRppSettings`
+- ~1,300 new lines of code
+
+---
+
 ## v2.4 (February 2026)
 
 **LUFS Calibration System:**

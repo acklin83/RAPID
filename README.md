@@ -1,4 +1,4 @@
-# RAPID v2.4 - Recording Auto-Placement & Intelligent Dynamics
+# RAPID v2.5 - Recording Auto-Placement & Intelligent Dynamics
 
 A professional workflow tool for REAPER that combines automated track mapping with intelligent LUFS-based normalization.
 
@@ -6,17 +6,22 @@ A professional workflow tool for REAPER that combines automated track mapping wi
 
 ## THREE WORKFLOWS IN ONE
 
-**1. IMPORT MODE**
+**1. IMPORT MODE (Single RPP)**
 - Map recording tracks to your mix template
 - Preserves all FX, sends, routing, automation
 - Perfect for recurring workflows (podcasts, live recordings, etc.)
 
-**2. NORMALIZE MODE**
+**2. MULTI-RPP IMPORT (NEW in v2.5)**
+- Import multiple RPP session files into the same template
+- Automatic regions, merged tempo/markers, configurable gap
+- Drag-and-drop reorder, column-based mapping UI
+
+**3. NORMALIZE MODE**
 - Standalone LUFS normalization for existing tracks
 - No import needed - works on current project
 - Quick loudness standardization
 
-**3. IMPORT + NORMALIZE (Full Workflow)**
+**4. IMPORT + NORMALIZE (Full Workflow)**
 - Complete automation: import, map, and normalize
 - One-click solution for production workflows
 - Professional gain staging in seconds
@@ -44,11 +49,19 @@ Your mode selection is saved and restored automatically.
 - Custom aliases for your workflow
 - Exact, contains, and similarity-based matching
 
+**Multi-RPP Import (NEW)**
+- Import multiple RPP files into one template project
+- Automatic regions per RPP (named from filename)
+- Full tempo/time-signature merging (measure-based)
+- Configurable gap between RPPs (in measures)
+- Drag-and-drop queue reordering
+- Column-based mapping with per-RPP dropdowns
+
 **LUFS-Based Normalization**
 - Instrument-specific profiles (Kick, Snare, Bass, etc.)
 - Segment-based measurement with percentile filtering
 - Threshold to ignore silent sections
-- **NEW: Calibration System** - Create profiles from reference tracks
+- Calibration System - Create profiles from reference tracks
 
 **Workflow Efficiency**
 - Multi-select rows for batch editing
@@ -83,7 +96,7 @@ See the built-in Help window (Help button in RAPID) for:
 
 **Recommended:**
 - SWS Extension (for full functionality)
-- JS_ReaScriptAPI (for multi-file import)
+- JS_ReaScriptAPI (for multi-file import and multi-RPP file dialog)
 
 ---
 
@@ -101,7 +114,7 @@ See the built-in Help window (Help button in RAPID) for:
 
 ## VERSION
 
-Current Version: **2.4**
+Current Version: **2.5**
 Last Updated: February 2026
 
 ---

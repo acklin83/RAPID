@@ -4,7 +4,7 @@
 
 **RAPID** (Recording Auto-Placement & Intelligent Dynamics) — a professional workflow automation tool for REAPER (DAW), written as a single Lua script.
 
-- **Current Version:** 2.4 (February 2026)
+- **Current Version:** 2.5 (February 2026)
 - **Developer:** Frank
 - **License:** MIT
 
@@ -18,7 +18,7 @@
 
 ## Architecture
 
-- **Monolithic single-file script:** `RAPID.lua` (~6,600 lines)
+- **Monolithic single-file script:** `RAPID.lua` (~8,500 lines)
 - No build step — script is loaded directly into REAPER via Actions → Load ReaScript
 - No automated tests — testing is manual inside REAPER
 - Config is persisted via INI files and REAPER ExtState
@@ -28,15 +28,19 @@
 | Section | Lines (approx.) | Purpose |
 |---|---|---|
 | Init & Constants | 1–150 | Version, defaults, profiles, aliases |
-| Persistence | 211–687 | saveIni/loadIni, protected tracks, session recovery |
-| File Operations | 751–895 | Path handling, media resolution, cross-platform |
-| Track & Project | 917–1300 | RPP parsing, chunk extraction, track manipulation |
-| Matching & Suggestion | 1027–1845 | Fuzzy matching, aliases, auto-suggest, profile matching |
-| Audio Processing | 2730–3150 | LUFS calculation, normalization, gain staging |
-| Track Operations | 2446–2630 | FX copying, sends, groups, lanes |
-| Main Workflow | 3518+ | commitMappings() — executes import/normalize |
-| UI Rendering | 3986–5161 | drawUI_body(), Settings, Help windows |
-| Entry Point | 6541–6633 | Dependency check, config load, event loop |
+| State Variables | 200–320 | All runtime state incl. multi-RPP variables |
+| Persistence | 330–850 | saveIni/loadIni, protected tracks, session recovery |
+| File Operations | 900–1050 | Path handling, media resolution, cross-platform |
+| Track & Project | 1050–1400 | RPP parsing, chunk extraction, track manipulation |
+| Matching & Suggestion | 1400–1750 | Fuzzy matching, aliases, auto-suggest, profile matching |
+| Multi-RPP Core | 1757–2200 | RPP queue, tempo extraction, merged tempo section, plaintext write |
+| Multi-RPP Track Ops | 2203–2430 | Shift envelopes, move items, consolidate tracks, auto-match |
+| Multi-RPP Commit | 2431–2700 | commitMultiRpp() — full multi-RPP pipeline |
+| Audio Processing | 2730–3500 | LUFS calculation, normalization, gain staging |
+| Track Operations | 3500–3700 | FX copying, sends, groups, lanes |
+| Main Workflow (Single) | 4943+ | commitMappings() — single-RPP import/normalize |
+| UI Rendering | 5464–7450 | drawUI_body(), Settings, Help windows |
+| Entry Point | 8458–8555 | Dependency check, config load, event loop |
 
 ### Key Data Structures
 
@@ -52,12 +56,19 @@
 - `deleteUnusedMode` — 0=keep unused, 1=delete unused (persisted in INI)
 - `calibrationWindow` — state for LUFS calibration popup (v2.4+)
 - `normProfiles` — array of profiles with optional per-profile LUFS settings (segmentSize, percentile, threshold)
+- `multiRppMode` — boolean toggle between single/multi RPP mode (v2.5+)
+- `rppQueue` — array of RPP entries: `{path, name, rppText, tracks[], baseTempo, tempoMap[], markers[], lengthInMeasures, startMeasure}`
+- `multiMap` — mapping: `multiMap[mixIdx][rppIdx] = trackIdxInRpp` (0 = unmapped)
+- `multiNormMap` — normalization per template track: `multiNormMap[mixIdx] = {profile, targetPeak}`
+- `multiRppSettings` — `{gapInMeasures=2, createRegions=true, importMarkers=true}`
+- `dragRppIdx` — drag source index for queue reordering (ImGui DragDrop)
 
-## Three Workflows
+## Four Workflows
 
-1. **Import Mode** — map recording tracks to mix template (preserves FX, sends, routing, automation)
-2. **Normalize Mode** — standalone LUFS normalization on existing tracks
-3. **Full Workflow** — import + mapping + normalization in one pass
+1. **Import Mode (Single RPP)** — map recording tracks to mix template (preserves FX, sends, routing, automation)
+2. **Import Mode (Multi-RPP)** — import multiple RPP files into the same template with merged tempo, regions, and track consolidation (v2.5+)
+3. **Normalize Mode** — standalone LUFS normalization on existing tracks
+4. **Full Workflow** — import + mapping + normalization in one pass (works with both single and multi-RPP)
 
 ## Code Conventions
 
@@ -77,7 +88,8 @@
 
 ## UI Details (v2.3+)
 
-- **Table columns (import mode):** 10 columns — Sel, ##color (swatch), ##lock (drawn icon), Template Destinations, Recording Sources, Keep name, Keep FX, Normalize, Peak dB, x (+/- buttons)
+- **Table columns (single-RPP import mode):** 10 columns — Sel, ##color (swatch), ##lock (drawn icon), Template Destinations, Recording Sources, Keep name, Keep FX, Normalize, Peak dB, x (+/- buttons)
+- **Table columns (multi-RPP import mode):** Lock, Template Destinations, [one column per RPP with dropdowns], Normalize, Peak dB — horizontal scrolling for many RPPs
 - **Lock icon:** Drawn via `ImGui_DrawList` (filled rect body + rect shackle), not font-based — ReaImGui default font has no emoji support
 - **Editable track names:** Double-click Template Destination → inline `InputText`, saves on deactivation (not just Enter)
 - **Duplicate slots:** Created via "+" button, inherit normMap settings, independently renamable via `slotNameOverride`
@@ -94,6 +106,9 @@
 - Chunk-based FX copying was tried and reverted (v1.4) — use native API (`TrackFX_CopyToTrack`)
 - Performance-critical: track operations were optimized from 20s → 2s (v1.5 refactor)
 - Import pipeline (`commitMappings()`) optimized in v2.3.1: cached chunk serialization, removed redundant `UpdateArrange()` calls, targeted peak building and media sweep to new tracks only, pre-computed normalization lookup
+- Multi-RPP import (`commitMultiRpp()`) uses a different pipeline: API tempo → import all tracks → shift/consolidate → plaintext tempo overwrite → reload
+- Tempo import via API loses Shape/Tension — used only for positioning; plaintext overwrite at end restores full fidelity
+- All multi-RPP calculations are measure-based, not time-based (time is unreliable with changing tempos)
 
 ## Normalization System (v2.4+)
 
@@ -103,6 +118,71 @@
 - **LUFS via CalculateNormalization:** Uses REAPER's native API with segment-based percentile measurement
 - **Per-profile LUFS settings:** Each profile can have custom segmentSize, percentile, threshold (stored in INI)
 - **Calibration workflow:** Select reference item → measure Peak+LUFS → create/update profile
+
+## Multi-RPP Import System (v2.5+)
+
+### Concept
+
+Import multiple RPP recording session files into the same mix template. Each RPP gets its own region, with tempo/time-signature changes merged correctly. All calculations are measure-based (not time-based) because time doesn't work reliably with changing tempos.
+
+### Architecture: Single-Pass with Two-Phase Tempo
+
+1. **API tempo first** — `setTempoViaAPI()` uses `SetTempoTimeSigMarker` to write tempo markers so REAPER can calculate correct positions for track import
+2. **Import tracks** — for each template track, import all mapped RPP tracks, shift items + envelopes to correct measure offsets, consolidate onto one master track
+3. **Plaintext tempo overwrite** — `writeMultiRppTempoSection()` replaces the entire tempo section in the saved .rpp file with full-fidelity plaintext (API loses Shape/Tension parameters), then reloads
+
+### RPP Queue
+
+- `rppQueue[]` entries contain: path, name, rppText, tracks[], baseTempo (bpm/num/denom), tempoMap[] (all tempo points), markers[], lengthInMeasures, startMeasure
+- `recalculateQueueOffsets()` computes measure-based start positions: each RPP starts after previous RPP's length + gap (in measures, default: 2), completing the last measure before gap
+- Drag-and-drop reordering via ImGui `DragDropSource`/`DragDropTarget`
+- JS_ReaScriptAPI multi-file dialog for loading multiple RPPs at once
+
+### Tempo Handling
+
+- `extractBaseTempo(rppText)` — parses `TEMPO <bpm> <num> <denom>` line
+- `extractTempoMap(rppText)` — parses `TEMPO` line + `<TEMPOENVEX>` `PT` points; time signature encoded as `65536 * denom + num`
+- `buildMergedTempoSection()` — builds complete plaintext section (TEMPO line + MARKER lines + TEMPOENVEX with all PT points from all RPPs, offset by measure positions)
+- `writeMultiRppTempoSection()` — saves project, reads .rpp file, replaces section between first `TEMPO` line and `<PROJBAY>`, writes back, reloads
+- Gap between RPPs inherits the last tempo from the preceding RPP
+
+### Track Consolidation Pipeline (`commitMultiRpp()`)
+
+```
+1. setTempoViaAPI() — rough tempo for positioning
+2. createMultiRppRegions() — one region per RPP (named from filename)
+3. importMultiRppMarkers() — markers with measure offsets
+4. For each template track with mappings:
+   a. Import all mapped RPP tracks (insertTrackFromRPP)
+   b. Shift items + envelopes to RPP's measure offset (shiftTrackEnvelopesBy)
+   c. Consolidate: move items + copy envelope points to first track
+   d. Copy FX/Sends from template track
+   e. Delete extra tracks + original template track
+5. Delete unused template tracks (if enabled)
+6. Normalize per region (uses auto-created RPP regions)
+7. Build peaks, minimize tracks
+8. writeMultiRppTempoSection() + reload for full-fidelity tempo
+```
+
+### Key Helper Functions
+
+- `shiftTrackEnvelopesBy(tr, delta)` — shifts all envelope points on a track by time delta
+- `moveItemsToTrack(srcTrack, destTrack)` — moves all media items between tracks via `MoveMediaItemToTrack`
+- `copyEnvelopePointsToTrack(srcTrack, destTrack)` — merges envelope points by matching envelope names
+- `measureToTime(measure, tempoMap, baseTempo)` — converts measure number to time position using tempo map
+
+### Multi-RPP UI
+
+- **Toggle:** "Multi-RPP" checkbox in toolbar enables/disables multi-RPP mode
+- **Queue panel:** CollapsingHeader showing loaded RPPs with drag-drop reorder, editable names, measure info, remove buttons
+- **Settings row:** Gap (measures), Create regions, Import markers checkboxes
+- **Column-based mapping table:** One dropdown column per loaded RPP, horizontal scrolling (`ScrollX`) for many RPPs
+- **Auto-match:** Per-column and all-columns auto-matching via `multiRppAutoMatchColumn()` / `multiRppAutoMatchAll()`
+
+### Known Limitations (MVP)
+
+- Send Envelopes and Pooled Automation items are not explicitly shifted (deferred to future version)
+- Pooled automation is copied as-is (works because it's pooled by reference)
 
 ## Resolved Issues
 
@@ -126,6 +206,7 @@
 - v2.3 (Feb 2026): Editable track names, duplicate slot improvements, delete unused toggle, offline media fix, DrawList lock icon, help text rewrite
 - v2.3.1 (Feb 2026): Import speed optimization — cached chunks, removed redundant UI updates, targeted peak/media operations, deduplicated norm lookup
 - v2.4 (Feb 2026): LUFS Calibration System — measure reference items to create/update profiles, per-profile LUFS settings, gain reset before normalization
+- v2.5 (Feb 2026): Multi-RPP Import — import multiple RPP files into same template, merged tempo/markers, measure-based offsets, track consolidation, column-based UI
 
 ## Files
 

@@ -2,41 +2,61 @@
 
 ---
 
-## Priority 0: LUFS Calibration System (v2.4)
+## Priority 0: Multi-RPP Import (DONE in v2.5)
 
-Create and update normalization profiles by measuring manually-leveled reference tracks.
+~~Import multiple RPP recording session files into the same mix template with merged tempo, regions, and track consolidation.~~
+
+- [x] RPP queue with drag-and-drop reordering
+- [x] Tempo extraction: `extractBaseTempo()`, `extractTempoMap()`, `extractMarkersFromRpp()`
+- [x] Measure-based offset calculation (`recalculateQueueOffsets()`)
+- [x] Two-phase tempo: API for positioning + plaintext overwrite for full fidelity
+- [x] Merged tempo section builder (`buildMergedTempoSection()`, `writeMultiRppTempoSection()`)
+- [x] Track consolidation: import → shift items/envelopes → merge onto master track
+- [x] Per-RPP region creation and marker import with offsets
+- [x] Column-based UI with per-RPP dropdowns and horizontal scrolling
+- [x] Per-column and all-columns auto-matching
+- [x] Multi-RPP commit pipeline (`commitMultiRpp()`)
+- [x] Normalization per region using auto-created RPP regions
+- [x] JS_ReaScriptAPI multi-file dialog
+- [x] INI persistence for multi-RPP settings
+
+---
+
+## Priority 0.5: LUFS Calibration System (DONE in v2.4)
+
+~~Create and update normalization profiles by measuring manually-leveled reference tracks.~~
 
 **Full specification:** See `LUFS-Calibration-Plan.md`
 
 ### 0.1 Architecture Changes
-- [ ] Remove global LUFS settings (`settings.lufsSegmentSize`, etc.)
-- [ ] Add `DEFAULT_LUFS_*` constants
-- [ ] Extend profile structure with optional measurement settings
-- [ ] Add `calibrationWindow` state
+- [x] Remove global LUFS settings (`settings.lufsSegmentSize`, etc.)
+- [x] Add `DEFAULT_LUFS_*` constants
+- [x] Extend profile structure with optional measurement settings
+- [x] Add `calibrationWindow` state
 
 ### 0.2 Measurement Functions
-- [ ] Implement `measureSelectedItemLoudness(segmentSize, percentile, threshold)`
-- [ ] Implement `getProfileLufsSettings(profile)` helper
+- [x] Implement `measureSelectedItemLoudness(segmentSize, percentile, threshold)`
+- [x] Implement `getProfileLufsSettings(profile)` helper
 
 ### 0.3 Calibration Window
-- [ ] Implement `openCalibrationWindow()`
-- [ ] Implement `remeasureCalibration()`
-- [ ] Implement `drawCalibrationWindow()` (non-modal)
-- [ ] Implement `saveCalibrationToProfile()`
+- [x] Implement `openCalibrationWindow()`
+- [x] Implement `remeasureCalibration()`
+- [x] Implement `drawCalibrationWindow()` (non-modal)
+- [x] Implement `saveCalibrationToProfile()`
 
 ### 0.4 UI Integration
-- [ ] Add "Calibrate from Selection" button to Settings → Normalization tab
-- [ ] Remove LUFS settings sliders from Settings window
-- [ ] Add `drawCalibrationWindow()` call to main loop
+- [x] Add "Calibrate from Selection" button to Settings → Normalization tab
+- [x] Remove LUFS settings sliders from Settings window
+- [x] Add `drawCalibrationWindow()` call to main loop
 
 ### 0.5 Persistence
-- [ ] Update INI format: `Profile=Name,Offset,Peak[,SegSize,Pct,Thresh]`
-- [ ] Update `saveSharedNormalizationSettings()` for new format
-- [ ] Update `loadSharedNormalizationSettings()` with backwards compatibility
+- [x] Update INI format: `Profile=Name,Offset,Peak[,SegSize,Pct,Thresh]`
+- [x] Update `saveSharedNormalizationSettings()` for new format
+- [x] Update `loadSharedNormalizationSettings()` with backwards compatibility
 
 ### 0.6 Normalization Update
-- [ ] Update normalization logic to use per-profile measurement settings
-- [ ] Fallback to defaults when profile has no settings
+- [x] Update normalization logic to use per-profile measurement settings
+- [x] Fallback to defaults when profile has no settings
 
 ---
 

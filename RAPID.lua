@@ -7462,26 +7462,31 @@ local function drawHelpWindow()
             -- ===== TAB: OVERVIEW =====
             if r.ImGui_BeginTabItem(ctx, "Overview") then
                 r.ImGui_TextWrapped(ctx, [[
-RAPID v2.3 - Recording Auto-Placement & Intelligent Dynamics
+RAPID v2.5 - Recording Auto-Placement & Intelligent Dynamics
 
 A professional workflow tool for REAPER that combines automated track
 mapping with intelligent LUFS-based normalization.
 
 --------------------------------------------------------------------
 
-THREE WORKFLOWS IN ONE:
+FOUR WORKFLOWS IN ONE:
 
-1. IMPORT MODE
+1. IMPORT MODE (Single RPP)
    -> Map recording tracks to your mix template
    -> Preserves all FX, sends, routing, automation
    -> Perfect for recurring workflows (podcasts, live recordings, etc.)
 
-2. NORMALIZE MODE
+2. MULTI-RPP IMPORT (NEW in v2.5)
+   -> Import multiple RPP session files into the same template
+   -> Automatic regions, merged tempo/markers, configurable gap
+   -> Drag-and-drop reorder, column-based mapping UI
+
+3. NORMALIZE MODE
    -> Standalone LUFS normalization for existing tracks
    -> No import needed - works on current project
    -> Quick loudness standardization
 
-3. IMPORT + NORMALIZE (Full Workflow)
+4. IMPORT + NORMALIZE (Full Workflow)
    -> Complete automation: import, map, and normalize
    -> One-click solution for production workflows
    -> Professional gain staging in seconds
@@ -7508,6 +7513,14 @@ KEY FEATURES:
   - Fuzzy matching handles typos and variations
   - Custom aliases for your workflow
   - Exact, contains, and similarity-based matching
+
+ Multi-RPP Import (NEW in v2.5)
+  - Import multiple RPP files into one template project
+  - Automatic regions per RPP (named from filename)
+  - Full tempo/time-signature merging (measure-based)
+  - Configurable gap between RPPs (in measures)
+  - Drag-and-drop queue reordering
+  - Column-based mapping with per-RPP dropdowns
 
  LUFS-Based Normalization
   - Instrument-specific profiles (Kick, Snare, Bass, etc.)
@@ -7681,7 +7694,7 @@ AFTER COMMIT OPTIONS:
 
 --------------------------------------------------------------------
 
-MARKERS, REGIONS & TEMPO:
+MARKERS, REGIONS & TEMPO (Single RPP):
 
 Use "Import Markers" button to transfer:
 - Markers from recording session
@@ -7693,12 +7706,57 @@ Reopen RAPID after import completes.
 
 --------------------------------------------------------------------
 
+MULTI-RPP IMPORT (NEW in v2.5):
+
+Import multiple RPP recording sessions into the same template.
+Each RPP gets its own region, with tempo and markers merged correctly.
+
+ When To Use
+  - Album/EP sessions (one RPP per song)
+  - Multi-day recordings into one mix project
+  - Compiling takes from different sessions
+
+ Step-by-Step Workflow
+  1. Enable "Multi-RPP" checkbox in toolbar
+  2. Click "Add .RPP" to load multiple session files
+     (or use multi-file dialog with JS_ReaScriptAPI)
+  3. Reorder RPPs via drag-and-drop in the queue
+  4. Set gap between RPPs (default: 2 measures)
+  5. Map tracks: one dropdown column per RPP
+  6. Use "Auto-match All" for automatic mapping
+  7. Assign normalization profiles if needed
+  8. Click "Commit" to execute
+
+ What Happens On Commit
+  - Tempo/time-signatures from all RPPs merged
+  - One region per RPP created (named from filename)
+  - Markers imported with correct measure offsets
+  - For each template track: all mapped RPP tracks imported,
+    shifted to correct position, consolidated onto one track
+  - FX/Sends/routing copied from template
+  - Normalization per region (if enabled)
+  - Full-fidelity tempo written via plaintext + project reload
+
+ Settings
+  - Gap (measures): silence between RPPs (default: 2)
+  - Create regions: auto-create region per RPP
+  - Import markers: import markers from RPPs
+
+ Column-Based Mapping Table
+  - One column per loaded RPP
+  - Dropdown to select which RPP track maps to each template slot
+  - Horizontal scrolling when many RPPs are loaded
+  - Auto-match per column or all columns at once
+
+--------------------------------------------------------------------
+
 TIPS:
 
  Use protected tracks for master/bus tracks you never want deleted
  Keep Name is useful when recording track names are descriptive
  Multi-select + batch edit = fast workflow for many tracks
  Process per region is perfect for multi-song live recordings
+ Multi-RPP mode: gap completes the last measure before adding silence
 ]])
                 r.ImGui_EndTabItem(ctx)
             end
@@ -8311,6 +8369,37 @@ Mix and match for your workflow:
             if r.ImGui_BeginTabItem(ctx, "Changelog") then
                 r.ImGui_TextWrapped(ctx, [[
 VERSION HISTORY
+
+--------------------------------------------------------------------
+
+v2.5 (February 2026)
+
+Multi-RPP Import:
+ Import multiple RPP files into the same mix template
+ Drag-and-drop reordering of RPP queue
+ Per-RPP regions created automatically (named from filename)
+ Tempo/time-signature changes merged from all RPPs (full fidelity)
+ Markers imported with correct measure offsets
+ Configurable gap between RPPs (in measures, default: 2)
+ Column-based UI with per-RPP dropdowns
+ Per-column and all-columns auto-matching
+ Track consolidation (import, shift, merge onto master track)
+ JS_ReaScriptAPI multi-file dialog support
+
+--------------------------------------------------------------------
+
+v2.4 (February 2026)
+
+LUFS Calibration System:
+ "Calibrate from Selection" button in Settings
+ Create/update profiles from reference tracks
+ Per-profile LUFS measurement settings
+ Calibration window with editable target peak
+
+Normalization:
+ Gain reset (Item Gain + Take Volume) before processing
+ All normalization via Take Volume only
+ AudioAccessor for accurate measurement
 
 --------------------------------------------------------------------
 

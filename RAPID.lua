@@ -1902,7 +1902,7 @@ local function loadRppToQueue(path)
     if not txt then return false end
 
     local dir = getDirname(path)
-    local filename = path:match("([^/\\]+)%.rpp$") or "Unnamed"
+    local filename = path:match("([^/\\]+)%.[rR][pP][pP]$") or path:match("([^/\\]+)$") or "Unnamed"
 
     -- Extract tempo map and base tempo
     local tempoMap, baseTempo = extractTempoMap(txt)
@@ -5679,7 +5679,7 @@ local function drawUI_body()
             -- Settings row
             r.ImGui_Text(ctx, "Gap:")
             r.ImGui_SameLine(ctx)
-            r.ImGui_SetNextItemWidth(ctx, 60)
+            r.ImGui_SetNextItemWidth(ctx, 100)
             local gapChanged, gapVal = r.ImGui_InputInt(ctx, "measures##gap", multiRppSettings.gapInMeasures)
             if gapChanged then
                 multiRppSettings.gapInMeasures = math.max(0, gapVal)
@@ -6349,7 +6349,7 @@ local function drawUI_body()
                     r.ImGui_Text(ctx, "(load .RPP or files)")
                 else
                     local current = slots[s] or 0
-                    local preview = (current > 0 and recSources[current].name) or "<none>"
+                    local preview = (current > 0 and recSources[current] and recSources[current].name) or "<none>"
                     
                     r.ImGui_SetNextItemWidth(ctx, -1)
                     if r.ImGui_BeginCombo(ctx, "##recSel_" .. globalRowID, preview) then
@@ -7714,7 +7714,7 @@ AFTER COMMIT OPTIONS:
 
 MARKERS, REGIONS & TEMPO (Single RPP):
 
-Use "Import Markers" button to transfer:
+Use "Import Markers/Tempomap" button to transfer:
 - Markers from recording session
 - Regions with names
 - Tempo map

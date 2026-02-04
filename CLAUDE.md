@@ -50,18 +50,17 @@
 - `normMap` — normalization profile assignments
 - `keepMap` — track name preservation settings
 - `fxMap` — FX copying settings per slot
-- `slotNameOverride` — per-slot custom names for duplicated tracks (`slotNameOverride[mixIdx][slot]`)
-- `editingDestTrack` / `editingDestBuf` — state for inline track name editing
+- `editState` — inline editing: `.track` (edit key), `.buf` (InputText buffer), `.slotNames[i][s]` (custom names for duplicate slots)
+- `uiFlags` — UI booleans: `.preview`, `.settings`, `.help`, `.close`, `.winInit`
+- `dragState` — drag-to-toggle: `.sel`, `.lock`, `.keepName`, `.keepFX`, `.lastClicked`
 - `selectedRows` — multi-select state (keyed by `"i_s"` format)
 - `deleteUnusedMode` — 0=keep unused, 1=delete unused (persisted in INI)
 - `calibrationWindow` — state for LUFS calibration popup (v2.4+)
 - `normProfiles` — array of profiles with optional per-profile LUFS settings (segmentSize, percentile, threshold)
-- `multiRppMode` — boolean toggle between single/multi RPP mode (v2.5+)
+- `multiRppSettings` — `{enabled=false, gapInMeasures=2, createRegions=true, importMarkers=true}`
 - `rppQueue` — array of RPP entries: `{path, name, rppText, tracks[], baseTempo, tempoMap[], markers[], lengthInMeasures, startMeasure}`
 - `multiMap` — mapping: `multiMap[mixIdx][rppIdx] = trackIdxInRpp` (0 = unmapped)
 - `multiNormMap` — normalization per template track: `multiNormMap[mixIdx] = {profile, targetPeak}`
-- `multiRppSettings` — `{gapInMeasures=2, createRegions=true, importMarkers=true}`
-- `dragRppIdx` — drag source index for queue reordering (ImGui DragDrop)
 
 ## Four Workflows
 

@@ -2775,8 +2775,19 @@ local function commitMultiRpp()
                 if normInfo and normInfo.profile ~= "-" then
                     local profile = getProfileByName(normInfo.profile)
                     if profile then
-                        normalizeTrack(tr, normInfo.profile, normInfo.targetPeak,
-                            true, regions)  -- true = per region
+                        local normType, targetValue, usedProfile
+                        if normInfo.profile == "Peak" then
+                            normType = "Peak"
+                            targetValue = normInfo.targetPeak
+                        elseif normInfo.profile == "RMS" then
+                            normType = "RMS"
+                            targetValue = normInfo.targetPeak
+                        else
+                            normType = "LUFS"
+                            targetValue = calculateLUFS(normInfo.targetPeak, profile.offset)
+                            usedProfile = profile
+                        end
+                        normalizeTrack(tr, normType, targetValue, regions, nil, usedProfile)
                     end
                 end
             end

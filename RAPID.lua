@@ -2417,43 +2417,153 @@ local function importMultiRppMarkers()
     end
 end
 
--- Auto-match one RPP column against template tracks
+-- Auto-match one RPP column against template tracks (same logic as autosuggest)
 local function multiRppAutoMatchColumn(rppIdx)
     if rppIdx < 1 or rppIdx > #rppQueue then return end
     local rpp = rppQueue[rppIdx]
     if not rpp or not rpp.tracks then return end
 
-    -- Build name lookup for this RPP's tracks
-    local rppTrackByName = {}
-    for j, track in ipairs(rpp.tracks) do
-        local key = (track.name or ""):lower()
-        if key ~= "" and not rppTrackByName[key] then
-            rppTrackByName[key] = j
+    local R = #rpp.tracks
+    local M = #mixTargets
+    if M == 0 or R == 0 then return end
+
+    -- Track which RPP tracks and template tracks are already assigned in this column
+    local usedR = {}
+    local usedM = {}
+    for mi, row in pairs(multiMap) do
+        if row[rppIdx] and row[rppIdx] > 0 then
+            usedR[row[rppIdx]] = true
+            usedM[mi] = true
         end
     end
 
-    -- Match against template tracks
-    for i, mixTr in ipairs(mixTargets) do
-        if validTrack(mixTr) then
-            local name = (nameCache[mixTr] or trName(mixTr)):lower()
+    local function eligible(i)
+        local tr = mixTargets[i]
+        if not validTrack(tr) then return false end
+        local nm = nameCache[tr] or trName(tr)
+        if protectedSet[nm] then return false end
+        if isFolderHeader(tr) then return false end
+        return true
+    end
 
-            -- Direct name match
-            local match = rppTrackByName[name]
+    -- Match scoring (same priority as autosuggest's calculateMatchScore)
+    local function getFirstWord(name)
+        local normalized = normalizeName(name)
+        return normalized:match("^(%w+)") or normalized
+    end
 
-            -- Try alias matching if no direct match
-            if not match and aliases then
-                for _, alias in ipairs(aliases) do
-                    local aliasLower = alias.src:lower()
-                    if name:find(aliasLower, 1, true) then
-                        match = rppTrackByName[alias.dst:lower()]
-                        if match then break end
+    local function calcScore(mixName, recName)
+        local mnorm = normalizeName(mixName)
+        local rnorm = normalizeName(recName)
+        if mnorm == "" or rnorm == "" then return 0 end
+        -- PRIORITY 1: Exact match (100%)
+        if mnorm == rnorm then return 1.0 end
+        -- PRIORITY 2: Prefix match with space/digit boundary (95%)
+        local mnorm_escaped = mnorm:gsub("([%.%-%+%*%?%[%]%(%)%^%$%%])", "%%%1")
+        local rnorm_escaped = rnorm:gsub("([%.%-%+%*%?%[%]%(%)%^%$%%])", "%%%1")
+        if rnorm:match("^" .. mnorm_escaped .. "[%s%d]") then return 0.95 end
+        if mnorm:match("^" .. rnorm_escaped .. "[%s%d]") then return 0.95 end
+        -- PRIORITY 3: First word exact match (85%)
+        local mixFirstWord = getFirstWord(mixName)
+        local recFirstWord = getFirstWord(recName)
+        if mixFirstWord ~= "" and recFirstWord ~= "" and
+           mixFirstWord == recFirstWord and #mixFirstWord > 1 then
+            return 0.85
+        end
+        -- PRIORITY 4: Contains match with word boundaries (75%)
+        local shorterLen = math.min(#mnorm, #rnorm)
+        local longerLen = math.max(#mnorm, #rnorm)
+        if shorterLen >= 3 and longerLen > shorterLen + 2 then
+            local shorter = (#mnorm < #rnorm) and mnorm or rnorm
+            local longer = (#mnorm < #rnorm) and rnorm or mnorm
+            local sh_esc = shorter:gsub("([%.%-%+%*%?%[%]%(%)%^%$%%])", "%%%1")
+            if longer:find("^" .. sh_esc .. "%s") or
+               longer:find("%s" .. sh_esc .. "%s") or
+               longer:find("%s" .. sh_esc .. "$") then
+                return 0.75
+            end
+        end
+        -- PRIORITY 5: Fuzzy similarity
+        return baseSimilarity(mixName, recName)
+    end
+
+    -- First pass: Alias matching
+    for i = 1, M do
+        if eligible(i) and not usedM[i] then
+            local mixL = trimLower(nameCache[mixTargets[i]] or trName(mixTargets[i]))
+            for j = 1, R do
+                if not usedR[j] then
+                    local recName = rpp.tracks[j].name or ""
+                    if recName:find("%.") then
+                        recName = recName:gsub("%.(%w+)$", " %1"):gsub("^%s+", "")
+                    end
+                    local dstL = findAliasTarget(recName)
+                    if dstL and dstL == mixL then
+                        multiMap[i] = multiMap[i] or {}
+                        multiMap[i][rppIdx] = j
+                        usedR[j] = true
+                        usedM[i] = true
+                        break
                     end
                 end
             end
+        end
+    end
 
-            if match then
-                multiMap[i] = multiMap[i] or {}
-                multiMap[i][rppIdx] = match
+    -- Second pass: Score-based matching with global optimization
+    local allMatches = {}
+    for j = 1, R do
+        if not usedR[j] then
+            local recName = rpp.tracks[j].name or ""
+            if recName:find("%.") then
+                recName = recName:gsub("%.(%w+)$", " %1"):gsub("^%s+", "")
+            end
+            for i = 1, M do
+                if eligible(i) and not usedM[i] then
+                    local mixName = nameCache[mixTargets[i]] or trName(mixTargets[i])
+                    local score = calcScore(mixName, recName)
+                    if score >= AUTOSUGGEST_THRESH then
+                        allMatches[#allMatches + 1] = {
+                            recIdx = j,
+                            mixIdx = i,
+                            score = score,
+                            recName = recName,
+                            mixName = mixName
+                        }
+                    end
+                end
+            end
+        end
+    end
+
+    -- Sort by score (highest first), then by name length
+    table.sort(allMatches, function(a, b)
+        if math.abs(a.score - b.score) > 0.001 then
+            return a.score > b.score
+        end
+        return #a.mixName < #b.mixName
+    end)
+
+    -- Group by recording track and assign best available match
+    local matchesByRec = {}
+    for _, match in ipairs(allMatches) do
+        if not matchesByRec[match.recIdx] then
+            matchesByRec[match.recIdx] = {}
+        end
+        table.insert(matchesByRec[match.recIdx], match)
+    end
+
+    for recIdx, matches in pairs(matchesByRec) do
+        if not usedR[recIdx] then
+            for _, match in ipairs(matches) do
+                if not usedM[match.mixIdx] then
+                    multiMap[match.mixIdx] = multiMap[match.mixIdx] or {}
+                    multiMap[match.mixIdx][rppIdx] = recIdx
+                    usedR[recIdx] = true
+                    usedM[match.mixIdx] = true
+                    lockParentFolders(match.mixIdx)
+                    break
+                end
             end
         end
     end
@@ -2465,6 +2575,16 @@ local function multiRppAutoMatchAll()
         multiRppAutoMatchColumn(rppIdx)
     end
 end
+
+-- Forward declarations for functions defined later but used in commitMultiRpp
+local sanitizeChunk
+local fixChunkMediaPaths
+local postprocessTrackCopyRelink
+local copyFX
+local cloneSends
+local rewireReceives
+local copyTrackControls
+local shiftTrackItemsBy
 
 -- ===== MULTI-RPP COMMIT FLOW =====
 local function commitMultiRpp()
@@ -3405,7 +3525,7 @@ local function doNormalizeDirectly()
 end
 
 -- ===== CHUNK SANITIZATION =====
-local function sanitizeChunk(chunk)
+sanitizeChunk = function(chunk)
     return (chunk
         :gsub("\nI_FOLDERDEPTH%s+%-?%d+", "\nI_FOLDERDEPTH 0")
         :gsub("\nAUXRECV.-\n", "\n")
@@ -3463,7 +3583,7 @@ local function tryResolveMedia(oldPath, rppDir)
     return nil
 end
 
-local function fixChunkMediaPaths(chunk, doCopy)
+fixChunkMediaPaths = function(chunk, doCopy)
     if not chunk then return chunk end
 
     local mediaPaths = extractMediaPathsFromChunk(chunk)
@@ -3506,7 +3626,7 @@ local function fixChunkMediaPaths(chunk, doCopy)
 end
 
 -- ===== POST-PROCESS TRACK =====
-local function postprocessTrackCopyRelink(track, doCopy)
+postprocessTrackCopyRelink = function(track, doCopy)
     if not track or not r.ValidatePtr(track, "MediaTrack*") then return end
 
     local item_cnt = r.CountTrackMediaItems(track)
@@ -3642,7 +3762,7 @@ local function createTrackWithAudioFileAtIndex(insertIdx, mixDepth, filePath, tr
 end
 
 -- ===== COPY FX/SENDS/CONTROLS (v1.1 API-based - WORKS!) =====
-local function copyFX(src, dst)
+copyFX = function(src, dst)
     if not (validTrack(src) and validTrack(dst)) then return end
     -- Delete all FX on destination
     for i = r.TrackFX_GetCount(dst) - 1, 0, -1 do
@@ -3708,7 +3828,7 @@ local function clearSendsHW(tr)
     end
 end
 
-local function cloneSends(src, dst)
+cloneSends = function(src, dst)
     if not (validTrack(src) and validTrack(dst)) then return end
     if not HAVE_SWS then return end
     
@@ -3740,7 +3860,7 @@ local function cloneSends(src, dst)
     r.SetTrackColor(dst, effective_rgb24(src))
 end
 
-local function rewireReceives(src, dst)
+rewireReceives = function(src, dst)
     if not (validTrack(src) and validTrack(dst) and HAVE_SWS) then return end
     
     local N = r.CountTracks(0)
@@ -3766,7 +3886,7 @@ local function rewireReceives(src, dst)
     end
 end
 
-local function copyTrackControls(src, dst)
+copyTrackControls = function(src, dst)
     if not (validTrack(src) and validTrack(dst)) then return end
     local function c(k)
         r.SetMediaTrackInfo_Value(dst, k, r.GetMediaTrackInfo_Value(src, k))
@@ -3824,7 +3944,7 @@ local function replaceGroupFlagsInChunk(chunk, templateChunkGroupFlags)
     return chunk
 end
 
-local function shiftTrackItemsBy(tr, delta)
+shiftTrackItemsBy = function(tr, delta)
     if not (validTrack(tr) and delta and math.abs(delta) >= 1e-9) then return end
     local cnt = r.CountTrackMediaItems(tr)
     for i = 0, cnt - 1 do
@@ -5920,6 +6040,14 @@ local function drawUI_body()
                     currentName = rpp.tracks[currentIdx].name
                 end
 
+                -- Build assignment lookup for this RPP column
+                local assignedInCol = {}
+                for mi, row in pairs(multiMap) do
+                    if row[rppIdx] and row[rppIdx] > 0 then
+                        assignedInCol[row[rppIdx]] = mi
+                    end
+                end
+
                 r.ImGui_SetNextItemWidth(ctx, -1)
                 if r.ImGui_BeginCombo(ctx, "##map_" .. i .. "_" .. rppIdx, currentName) then
                     -- "-" option (unmapped)
@@ -5927,11 +6055,35 @@ local function drawUI_body()
                         multiMap[i][rppIdx] = 0
                     end
 
-                    -- Track options from this RPP
+                    -- Track options from this RPP (with dimming for assigned tracks)
                     for j, track in ipairs(rpp.tracks) do
-                        local label = track.name .. "##" .. i .. "_" .. rppIdx .. "_" .. j
-                        if r.ImGui_Selectable(ctx, label, currentIdx == j) then
+                        local ownerMix = assignedInCol[j]
+                        local isMine = (ownerMix == i)
+                        local dim = ownerMix and not isMine
+                        local pushed = false
+
+                        if dim then
+                            r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_Alpha(), 0.5)
+                            pushed = true
+                        end
+
+                        local label = track.name
+                        if ownerMix and not isMine then
+                            local ownerName = (validTrack(mixTargets[ownerMix]) and (nameCache[mixTargets[ownerMix]] or trName(mixTargets[ownerMix]))) or "?"
+                            label = label .. " [-> " .. ownerName .. "]"
+                        end
+
+                        local uniqueLabel = label .. "##" .. i .. "_" .. rppIdx .. "_" .. j
+                        if r.ImGui_Selectable(ctx, uniqueLabel, currentIdx == j) then
+                            -- If stealing from another template track, clear that assignment
+                            if ownerMix and not isMine then
+                                multiMap[ownerMix][rppIdx] = 0
+                            end
                             multiMap[i][rppIdx] = j
+                        end
+
+                        if pushed then
+                            r.ImGui_PopStyleVar(ctx)
                         end
                     end
 

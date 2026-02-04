@@ -1871,13 +1871,17 @@ end
 local function calculateRppLengthInMeasures(rppText, baseTempo, tempoMap)
     local maxEndTime = 0
 
-    -- Find all ITEM blocks and get POSITION + LENGTH
-    for itemBlock in rppText:gmatch("<ITEM.-\n>") do
-        local pos = tonumber(itemBlock:match("POSITION%s+([%d%.]+)")) or 0
-        local len = tonumber(itemBlock:match("LENGTH%s+([%d%.]+)")) or 0
-        local itemEnd = pos + len
-        if itemEnd > maxEndTime then
-            maxEndTime = itemEnd
+    -- Scan line-by-line for POSITION/LENGTH pairs inside ITEM blocks
+    -- (indented RPP format makes <ITEM.-\n> pattern unreliable)
+    local curPos = nil
+    for line in rppText:gmatch("[^\n]+") do
+        local p = line:match("^%s*POSITION%s+([%d%.]+)")
+        if p then curPos = tonumber(p) or 0 end
+        local l = line:match("^%s*LENGTH%s+([%d%.]+)")
+        if l and curPos then
+            local itemEnd = curPos + (tonumber(l) or 0)
+            if itemEnd > maxEndTime then maxEndTime = itemEnd end
+            curPos = nil
         end
     end
 
@@ -2706,11 +2710,11 @@ local function commitMultiRpp()
                 -- (shifting via API after SetTrackStateChunk can fail inside PreventUIRefresh)
                 -- Must be done BEFORE adding POOLEDENV (pooled envs use beat-based positions)
                 if mp.offset > 0 then
-                    chunk = chunk:gsub("(\nPOSITION%s+)([%d%.%-]+)", function(prefix, pos)
+                    chunk = chunk:gsub("(\n%s*POSITION%s+)([%d%.%-]+)", function(prefix, pos)
                         return prefix .. string.format("%.10f", tonumber(pos) + mp.offset)
                     end)
                     -- Shift envelope points (PT <time> ...) in track envelopes
-                    chunk = chunk:gsub("(\nPT%s+)([%d%.%-]+)", function(prefix, t)
+                    chunk = chunk:gsub("(\n%s*PT%s+)([%d%.%-]+)", function(prefix, t)
                         return prefix .. string.format("%.10f", tonumber(t) + mp.offset)
                     end)
                     log(string.format("  Shifted RPP %d chunk positions by %.2fs\n", mp.rppIdx, mp.offset))

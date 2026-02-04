@@ -210,7 +210,6 @@ local importMode = true      -- Import & mapping functionality (RAPID)
 local normalizeMode = true   -- Normalization functionality (Little Joe)
 
 -- ===== GLOBAL STATE =====
-local copyMediaOnCommit = false
 local normProfiles = {}
 local busKeywords = {}
 local aliases = {}
@@ -225,6 +224,7 @@ local settings = {
     -- Import mode settings
     autoMatchTracksOnImport = true,
     autoMatchProfilesOnImport = true,
+    copyMedia = false,  -- Copy media into project on commit (was copyMediaOnCommit)
 
     -- Normalize mode settings
     processPerRegion = true,
@@ -239,10 +239,12 @@ local settings = {
 }
 
 -- Mapping data (Import Mode)
-local recPathRPP = nil
-local recPathRPPDir = nil
+local recPath = {
+    rpp = nil,          -- Path to source .rpp file (was recPathRPP)
+    dir = nil,          -- Directory of source .rpp (was recPathRPPDir)
+    regionCount = 0,    -- Count of regions in source RPP (was recSourceRegionCount)
+}
 local recSources = {}
-local recSourceRegionCount = 0  -- Count of regions in source RPP
 local mixTargets = {}
 local map = {}
 local normMap = {}  -- Maps trackIndex -> slotIndex -> {profile, targetPeak}
@@ -323,10 +325,12 @@ local multiRppSettings = {
     importMarkers = true,         -- Import markers from all RPPs
 }
 
--- Caches
-local hasKids = setmetatable({}, {__mode="k"})
+-- Caches (grouped to reduce local count)
 local nameCache = setmetatable({}, {__mode="k"})
-local effColorCache = setmetatable({}, {__mode="k"})
+local trackCache = {
+    kids = setmetatable({}, {__mode="k"}),   -- was hasKids
+    color = setmetatable({}, {__mode="k"}),  -- was effColorCache
+}
 
 _G.__mr_offset = 0.0
 _G.__mixTargets = mixTargets
@@ -464,7 +468,7 @@ end
 -- ===== FULL STATE SAVE/LOAD (for project reload) =====
 -- ===== IMPORT MARKERS/REGIONS/TEMPO (POST-COMMIT) =====
 local function importMarkersTempoPostCommit()
-    if not recPathRPP or recPathRPP == "" then
+    if not recPath.rpp or recPath.rpp == "" then
         log("No recording RPP loaded, skipping marker import\n")
         return
     end
@@ -472,7 +476,7 @@ local function importMarkersTempoPostCommit()
     log("\n=== Importing Markers/Regions/Tempo ===\n")
     
     -- Read source RPP  
-    local f = io.open(recPathRPP, "rb")
+    local f = io.open(recPath.rpp, "rb")
     if not f then
         log("Cannot read source RPP\n")
         return
@@ -1540,9 +1544,9 @@ end
 local function rebuildMixTargets()
     mixTargets = {}
     protectedSet = protectedSet or {}
-    hasKids = setmetatable({}, {__mode = "k"})
+    trackCache.kids = setmetatable({}, {__mode = "k"})
     nameCache = setmetatable({}, {__mode = "k"})
-    effColorCache = setmetatable({}, {__mode = "k"})
+    trackCache.color = setmetatable({}, {__mode = "k"})
     
     local N = r.CountTracks(0)
     local busStack, activeBus = {}, false
@@ -1567,9 +1571,9 @@ local function rebuildMixTargets()
                 local nm = trName(tr)
                 nameCache[tr] = nm
                 mixTargets[#mixTargets + 1] = tr
-                for _, par in ipairs(visStack) do hasKids[par] = true end
+                for _, par in ipairs(visStack) do trackCache.kids[par] = true end
                 if d == 1 then visStack[#visStack + 1] = tr end
-                effColorCache[tr] = effective_rgb24(tr)
+                trackCache.color[tr] = effective_rgb24(tr)
             end
             
             if d < 0 then
@@ -1593,7 +1597,7 @@ end
 local function isLeafCached(tr)
     if not validTrack(tr) then return true end
     if isFolderHeader(tr) then return false end
-    return not (hasKids and hasKids[tr])
+    return not (trackCache.kids and trackCache.kids[tr])
 end
 
 -- ===== LOCK PARENT FOLDERS =====
@@ -1676,15 +1680,15 @@ local function loadRecRPP(path)
         return
     end
     
-    recPathRPP = path
-    recPathRPPDir = getDirname(path)
+    recPath.rpp = path
+    recPath.dir = getDirname(path)
     
     local txt = readAll(path)
     if not txt then return end
     
     -- Count regions in source RPP
-    recSourceRegionCount = countRegionsInRPP(txt)
-    log(string.format("Source RPP has %d regions\n", recSourceRegionCount))
+    recPath.regionCount = countRegionsInRPP(txt)
+    log(string.format("Source RPP has %d regions\n", recPath.regionCount))
     
     -- Extract all POOLEDENV sections from RPP
     local pooledEnvs = extractPooledEnvs(txt)
@@ -1753,8 +1757,8 @@ end
 
 local function clearRecList()
     recSources = {}
-    recPathRPP = nil
-    recPathRPPDir = nil
+    recPath.rpp = nil
+    recPath.dir = nil
     _G.__recSources = recSources
 end
 
@@ -2013,10 +2017,10 @@ function rebuildRecSourcesFromQueue()
         end
     end
 
-    -- Also set recPathRPP to first RPP for marker import compatibility
+    -- Also set recPath.rpp to first RPP for marker import compatibility
     if rppQueue[1] then
-        recPathRPP = rppQueue[1].path
-        recPathRPPDir = rppQueue[1].dir
+        recPath.rpp = rppQueue[1].path
+        recPath.dir = rppQueue[1].dir
     end
 
     _G.__recSources = recSources
@@ -2201,8 +2205,8 @@ local function clearRppQueue()
     multiMap = {}
     multiNormMap = {}
     recSources = {}
-    recPathRPP = nil
-    recPathRPPDir = nil
+    recPath.rpp = nil
+    recPath.dir = nil
     _G.__recSources = recSources
 end
 
@@ -2508,10 +2512,10 @@ local function commitMultiRpp()
                 local chunk = sanitizeChunk(mp.entry.chunk)
 
                 -- Fix media paths relative to source RPP dir
-                local savedDir = recPathRPPDir
-                recPathRPPDir = mp.rppDir
-                chunk = fixChunkMediaPaths(chunk, copyMediaOnCommit)
-                recPathRPPDir = savedDir
+                local savedDir = recPath.dir
+                recPath.dir = mp.rppDir
+                chunk = fixChunkMediaPaths(chunk, settings.copyMedia)
+                recPath.dir = savedDir
 
                 -- Add POOLEDENV if needed
                 if mp.entry.pooledEnvs and #mp.entry.pooledEnvs > 0 then
@@ -2526,7 +2530,7 @@ local function commitMultiRpp()
                 end
 
                 r.SetTrackStateChunk(newTr, chunk, false)
-                postprocessTrackCopyRelink(newTr, copyMediaOnCommit)
+                postprocessTrackCopyRelink(newTr, settings.copyMedia)
 
                 r.SetMediaTrackInfo_Value(newTr, "I_FOLDERDEPTH", 0)
                 r.SetMediaTrackInfo_Value(newTr, "I_RECARM", 0)
@@ -3440,7 +3444,7 @@ local function fixChunkMediaPaths(chunk, doCopy)
     local newChunk = chunk
 
     for _, oldPath in ipairs(mediaPaths) do
-        local resolvedPath = tryResolveMedia(oldPath, recPathRPPDir)
+        local resolvedPath = tryResolveMedia(oldPath, recPath.dir)
 
         if resolvedPath then
             local finalPath = resolvedPath
@@ -3502,7 +3506,7 @@ local function postprocessTrackCopyRelink(track, doCopy)
                                 end
                             elseif not fileExists(cur) then
                                 -- No-copy mode: resolve and relink offline sources
-                                local resolved = tryResolveMedia(cur, recPathRPPDir)
+                                local resolved = tryResolveMedia(cur, recPath.dir)
                                 if resolved and fileExists(resolved) then
                                     log(string.format("    relink: '%s' -> '%s'\n", cur, resolved))
                                     local newSrc = r.PCM_Source_CreateFromFile(resolved)
@@ -3510,7 +3514,7 @@ local function postprocessTrackCopyRelink(track, doCopy)
                                         r.SetMediaItemTake_Source(take, newSrc)
                                     end
                                 else
-                                    log(string.format("    STILL OFFLINE: '%s' (rppDir='%s')\n", cur, recPathRPPDir or "nil"))
+                                    log(string.format("    STILL OFFLINE: '%s' (rppDir='%s')\n", cur, recPath.dir or "nil"))
                                 end
                             end
                         end
@@ -3571,7 +3575,7 @@ local function createTrackWithAudioFileAtIndex(insertIdx, mixDepth, filePath, tr
         return nil
     end
     
-    if copyMediaOnCommit then
+    if settings.copyMedia then
         finalPath = copyMediaToProject(filePath)
     end
     
@@ -3842,7 +3846,7 @@ local function replaceMixWithSourceAtSamePosition(entry, mixTr)
         end
         
         local chunk = sanitizeChunk(entry.chunk)
-        chunk = fixChunkMediaPaths(chunk, copyMediaOnCommit)
+        chunk = fixChunkMediaPaths(chunk, settings.copyMedia)
 
         -- CRITICAL: Add POOLEDENV data to track chunk if this track has automation items
         if entry.pooledEnvs and #entry.pooledEnvs > 0 then
@@ -3875,7 +3879,7 @@ local function replaceMixWithSourceAtSamePosition(entry, mixTr)
         local checkAfter = r.GetMediaTrackInfo_Value(t, "I_GROUPFLAGS")
         log(string.format(">>> After SetTrackStateChunk: I_GROUPFLAGS = 0x%X (%d)\n", checkAfter, checkAfter))
         
-        postprocessTrackCopyRelink(t, copyMediaOnCommit)
+        postprocessTrackCopyRelink(t, settings.copyMedia)
         
         r.SetMediaTrackInfo_Value(t, "I_FOLDERDEPTH", mixDepth)
         r.SetMediaTrackInfo_Value(t, "I_RECARM", 0)
@@ -5086,7 +5090,7 @@ local function commitMappings()
                 end
             elseif entry then
                 local chunk = sanitizeChunk(entry.chunk)
-                chunk = fixChunkMediaPaths(chunk, copyMediaOnCommit)
+                chunk = fixChunkMediaPaths(chunk, settings.copyMedia)
                 
                 -- Replace GROUP_FLAGS in chunk with groups from firstNew (using cached chunk)
                 if firstNewChunk then
@@ -5098,7 +5102,7 @@ local function commitMappings()
                 end
                 
                 r.SetTrackStateChunk(newTr, chunk, false)
-                postprocessTrackCopyRelink(newTr, copyMediaOnCommit)
+                postprocessTrackCopyRelink(newTr, settings.copyMedia)
                 
                 r.SetMediaTrackInfo_Value(newTr, "I_FOLDERDEPTH", 0)
                 setTrName(newTr, slotName)
@@ -5168,7 +5172,7 @@ local function commitMappings()
     r.TrackList_AdjustWindows(false)
     r.UpdateArrange()
     
-    if copyMediaOnCommit then
+    if settings.copyMedia then
         -- Sweep only newly created tracks instead of entire project
         local media_dir = getProjectMediaDir()
         for _, tr in ipairs(allCreatedTracks) do
@@ -5600,17 +5604,17 @@ local function drawUI_body()
         if not multiVal then
             -- Switching back to single mode: use first queued RPP or clear
             if #rppQueue > 0 then
-                recPathRPP = rppQueue[1].path
-                recPathRPPDir = rppQueue[1].dir
+                recPath.rpp = rppQueue[1].path
+                recPath.dir = rppQueue[1].dir
                 recSources = {}
                 loadRecRPP(rppQueue[1].path)
             end
             rppQueue = {}
         else
             -- Switching to multi mode: convert current single RPP to queue
-            if recPathRPP and recPathRPP ~= "" then
+            if recPath.rpp and recPath.rpp ~= "" then
                 rppQueue = {}
-                loadRppToQueue(recPathRPP)
+                loadRppToQueue(recPath.rpp)
             end
         end
     end
@@ -5650,9 +5654,9 @@ local function drawUI_body()
 
     -- RPP path info (single mode) or queue info (multi mode)
     if not multiRppSettings.enabled then
-        if recPathRPP then
+        if recPath.rpp then
             r.ImGui_SameLine(ctx)
-            r.ImGui_TextColored(ctx, theme.text_dim, "  RPP: " .. recPathRPP)
+            r.ImGui_TextColored(ctx, theme.text_dim, "  RPP: " .. recPath.rpp)
         end
     else
         r.ImGui_SameLine(ctx)
@@ -6240,7 +6244,7 @@ local function drawUI_body()
                 r.ImGui_TableSetColumnIndex(ctx, 1)
                 local name = nameCache[tr] or trName(tr)
                 do
-                    local rgb = effColorCache[tr] or 0
+                    local rgb = trackCache.color[tr] or 0
                     local u32 = u32_from_rgb24(rgb)
                     local dl = r.ImGui_GetWindowDrawList(ctx)
                     local x, y = r.ImGui_GetCursorScreenPos(ctx)
@@ -6632,8 +6636,8 @@ local function drawUI_body()
     r.ImGui_SameLine(ctx)
     r.ImGui_Dummy(ctx, 12, 0)
     r.ImGui_SameLine(ctx)
-    local _, cmc = r.ImGui_Checkbox(ctx, "Copy media", copyMediaOnCommit)
-    copyMediaOnCommit = cmc
+    local _, cmc = r.ImGui_Checkbox(ctx, "Copy media", settings.copyMedia)
+    settings.copyMedia = cmc
 
     -- Options row 2: Normalization options (horizontal)
     if normalizeMode then

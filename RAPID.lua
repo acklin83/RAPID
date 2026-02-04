@@ -5955,7 +5955,7 @@ local function drawUI_body()
 
     -- Columns: [Lock] [Template] [RPP1] [RPP2] ... [RPPn] [Normalize?] [Peak?]
     local numRpps = #rppQueue
-    local numColumns = 2 + numRpps  -- Lock + Template + RPP columns
+    local numColumns = 3 + numRpps  -- Lock + Color + Template + RPP columns
     if normalizeMode then numColumns = numColumns + 2 end  -- + Normalize + Peak
 
     local scrollFlags = flags | r.ImGui_TableFlags_ScrollX()
@@ -5964,6 +5964,7 @@ local function drawUI_body()
         local COLFIX = r.ImGui_TableColumnFlags_WidthFixed()
 
         r.ImGui_TableSetupColumn(ctx, "##lock", COLFIX, 25.0)
+        r.ImGui_TableSetupColumn(ctx, "##color", COLFIX, 18.0)
         r.ImGui_TableSetupColumn(ctx, "Template", COLFIX, 150.0)
 
         for rppIdx, rpp in ipairs(rppQueue) do
@@ -5975,19 +5976,19 @@ local function drawUI_body()
             r.ImGui_TableSetupColumn(ctx, "Peak dB", COLFIX, 80.0)
         end
 
-        r.ImGui_TableSetupScrollFreeze(ctx, 2, 1)  -- Freeze Lock + Template columns
+        r.ImGui_TableSetupScrollFreeze(ctx, 3, 1)  -- Freeze Lock + Color + Template columns
         r.ImGui_TableHeadersRow(ctx)
 
         -- Auto-match button row
         r.ImGui_TableNextRow(ctx)
         r.ImGui_TableSetColumnIndex(ctx, 0)
-        r.ImGui_TableSetColumnIndex(ctx, 1)
+        r.ImGui_TableSetColumnIndex(ctx, 2)
         if sec_button("Match All##multi") then
             multiRppAutoMatchAll()
         end
 
         for rppIdx = 1, numRpps do
-            r.ImGui_TableSetColumnIndex(ctx, 1 + rppIdx)
+            r.ImGui_TableSetColumnIndex(ctx, 2 + rppIdx)
             if sec_button("Match##rpp" .. rppIdx) then
                 multiRppAutoMatchColumn(rppIdx)
             end
@@ -6024,14 +6025,27 @@ local function drawUI_body()
                 saveProtected()
             end
 
-            -- Template name column
+            -- Color swatch column
             r.ImGui_TableSetColumnIndex(ctx, 1)
+            do
+                local rgb = trackCache.color[tr] or 0
+                local u32 = u32_from_rgb24(rgb)
+                local dl = r.ImGui_GetWindowDrawList(ctx)
+                local x, y = r.ImGui_GetCursorScreenPos(ctx)
+                local swh = (settings.swatch_size or 12)
+                r.ImGui_DrawList_AddRectFilled(dl, x + 2, y + 3, x + 2 + swh, y + 3 + swh, u32, 3.0)
+                r.ImGui_DrawList_AddRect(dl, x + 2, y + 3, x + 2 + swh, y + 3 + swh, 0xFF000000, 3.0, 0, 1.0)
+                r.ImGui_Dummy(ctx, swh + 4, swh + 2)
+            end
+
+            -- Template name column
+            r.ImGui_TableSetColumnIndex(ctx, 2)
             local displayName = trackName .. (isFolder and " (Folder)" or "")
             r.ImGui_Text(ctx, displayName)
 
             -- RPP columns (dropdown per RPP)
             for rppIdx, rpp in ipairs(rppQueue) do
-                r.ImGui_TableSetColumnIndex(ctx, 1 + rppIdx)
+                r.ImGui_TableSetColumnIndex(ctx, 2 + rppIdx)
 
                 multiMap[i] = multiMap[i] or {}
                 local currentIdx = multiMap[i][rppIdx] or 0
@@ -6096,7 +6110,7 @@ local function drawUI_body()
                 multiNormMap[i] = multiNormMap[i] or {profile = "-", targetPeak = -6}
 
                 -- Profile dropdown
-                r.ImGui_TableSetColumnIndex(ctx, 1 + numRpps + 1)
+                r.ImGui_TableSetColumnIndex(ctx, 2 + numRpps + 1)
                 r.ImGui_SetNextItemWidth(ctx, -1)
                 local currentProfile = multiNormMap[i].profile
 
@@ -6116,7 +6130,7 @@ local function drawUI_body()
                 end
 
                 -- Peak dB input
-                r.ImGui_TableSetColumnIndex(ctx, 1 + numRpps + 2)
+                r.ImGui_TableSetColumnIndex(ctx, 2 + numRpps + 2)
                 r.ImGui_SetNextItemWidth(ctx, -1)
                 local peakChanged, peakVal = r.ImGui_InputInt(ctx, "##peak_" .. i, multiNormMap[i].targetPeak)
                 if peakChanged then

@@ -3246,6 +3246,87 @@ local function autoMatchProfiles()
     end
 end
 
+-- ===== AUTO-MATCH PROFILES FOR MULTI-RPP =====
+local function autoMatchProfilesMulti()
+    if #mixTargets == 0 or #normProfiles == 0 then return end
+
+    local thresh = 0.40
+
+    for i, tr in ipairs(mixTargets) do
+        local trackName = nameCache[tr] or trName(tr)
+
+        if protectedSet[trackName] then goto continue end
+
+        -- Only match tracks that have a recording assignment in multiMap
+        local hasRecording = false
+        if multiMap[i] then
+            for _, v in pairs(multiMap[i]) do
+                if v and v > 0 then hasRecording = true; break end
+            end
+        end
+        if not hasRecording then goto continue end
+
+        -- FIRST: Check profileAliases (contains match, longest first)
+        local foundAlias = false
+        local trackNameLower = trackName:lower()
+
+        local sortedAliases = {}
+        for _, alias in ipairs(profileAliases) do
+            sortedAliases[#sortedAliases + 1] = alias
+        end
+        table.sort(sortedAliases, function(a, b)
+            return #(a.src or "") > #(b.src or "")
+        end)
+
+        for _, alias in ipairs(sortedAliases) do
+            local srcList = alias.src or ""
+            for srcPart in (srcList .. ","):gmatch("([^,]+),") do
+                local srcLower = srcPart:gsub("^%s+", ""):gsub("%s+$", ""):lower()
+                if srcLower ~= "" and trackNameLower:find(srcLower, 1, true) then
+                    local targetProfileName = alias.dst or ""
+                    for _, profile in ipairs(normProfiles) do
+                        if profile.name:lower() == targetProfileName:lower() then
+                            multiNormMap[i] = {
+                                profile = profile.name,
+                                targetPeak = profile.defaultPeak or -6
+                            }
+                            foundAlias = true
+                            break
+                        end
+                    end
+                    if foundAlias then break end
+                end
+            end
+            if foundAlias then break end
+        end
+
+        if foundAlias then goto continue end
+
+        -- SECOND: Fuzzy matching
+        local bestProfile = nil
+        local bestScore = thresh
+
+        for _, profile in ipairs(normProfiles) do
+            local score = baseSimilarity(trackName, profile.name)
+            if score > bestScore then
+                bestProfile = profile
+                bestScore = score
+            end
+        end
+
+        if bestProfile then
+            multiNormMap[i] = {
+                profile = bestProfile.name,
+                targetPeak = bestProfile.defaultPeak or -6
+            }
+        else
+            multiNormMap[i] = multiNormMap[i] or {profile = "-", targetPeak = -6}
+        end
+
+        ::continue::
+    end
+end
+
 -- ===== NORMALIZE-ONLY MODE FUNCTIONS (from Little Joe) =====
 
 local function loadTracksWithItems()
@@ -5985,12 +6066,20 @@ local function drawUI_body()
         r.ImGui_TableSetColumnIndex(ctx, 2)
         if sec_button("Match All##multi") then
             multiRppAutoMatchAll()
+            if normalizeMode then autoMatchProfilesMulti() end
         end
 
         for rppIdx = 1, numRpps do
             r.ImGui_TableSetColumnIndex(ctx, 2 + rppIdx)
             if sec_button("Match##rpp" .. rppIdx) then
                 multiRppAutoMatchColumn(rppIdx)
+            end
+        end
+
+        if normalizeMode then
+            r.ImGui_TableSetColumnIndex(ctx, 2 + numRpps + 1)
+            if sec_button("Match##multinorm") then
+                autoMatchProfilesMulti()
             end
         end
 

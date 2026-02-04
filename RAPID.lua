@@ -1966,7 +1966,19 @@ end
 -- Remove RPP from queue
 local function removeRppFromQueue(idx)
     if idx < 1 or idx > #rppQueue then return end
+    local oldCount = #rppQueue
     table.remove(rppQueue, idx)
+    -- Shift multiMap entries: remove column idx, shift higher indices down
+    for i, _ in pairs(multiMap) do
+        local row = multiMap[i]
+        if row then
+            -- Remove the entry for the deleted RPP, shift rest down
+            for r = idx, oldCount - 1 do
+                row[r] = row[r + 1]
+            end
+            row[oldCount] = nil
+        end
+    end
     recalculateQueueOffsets()
 end
 
@@ -1976,8 +1988,24 @@ local function moveRppInQueue(fromIdx, toIdx)
     if toIdx < 1 or toIdx > #rppQueue then return end
     if fromIdx == toIdx then return end
 
+    local n = #rppQueue
     local item = table.remove(rppQueue, fromIdx)
     table.insert(rppQueue, toIdx, item)
+
+    -- Reorder multiMap columns to match the new queue order
+    -- Same logic: remove column fromIdx, insert at toIdx
+    for i, _ in pairs(multiMap) do
+        local row = multiMap[i]
+        if row then
+            local saved = row[fromIdx]
+            if fromIdx < toIdx then
+                for r = fromIdx, toIdx - 1 do row[r] = row[r + 1] end
+            else
+                for r = fromIdx, toIdx + 1, -1 do row[r] = row[r - 1] end
+            end
+            row[toIdx] = saved
+        end
+    end
 
     recalculateQueueOffsets()
 end
@@ -5590,8 +5618,8 @@ local function drawUI_body()
         r.ImGui_SameLine(ctx)
         if sec_button("Clear Queue##multi") then
             clearRppQueue()
-            map = {}
-            normMap = {}
+            multiMap = {}
+            multiNormMap = {}
         end
     end
 
@@ -5610,10 +5638,14 @@ local function drawUI_body()
                 loadRecRPP(rppQueue[1].path)
             end
             rppQueue = {}
+            multiMap = {}
+            multiNormMap = {}
         else
             -- Switching to multi mode: convert current single RPP to queue
             if recPath.rpp and recPath.rpp ~= "" then
                 rppQueue = {}
+                multiMap = {}
+                multiNormMap = {}
                 loadRppToQueue(recPath.rpp)
             end
         end

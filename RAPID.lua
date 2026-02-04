@@ -258,7 +258,6 @@ local normMapDirect = {}   -- Maps track index -> {profile, targetPeak} for norm
 
 -- UI state (grouped to stay under Lua's 200 local variable limit)
 local uiFlags = {
-    preview = false,
     settings = false,
     help = false,
     close = false,
@@ -6961,7 +6960,7 @@ local function drawUI_body()
         end
     end
 
-    -- Info + Action buttons: Preview left, Commit+Close right
+    -- Info + Action buttons: Commit+Close right-aligned
     local processCount = 0
     for i, tr in ipairs(mixTargets) do
         local slots = map[i] or {0}
@@ -6973,10 +6972,6 @@ local function drawUI_body()
         end
     end
     r.ImGui_TextColored(ctx, theme.text_dim, string.format("%d tracks", processCount))
-    r.ImGui_SameLine(ctx)
-    if sec_button("Preview##import") then
-        uiFlags.preview = true
-    end
 
     local win_w = r.ImGui_GetContentRegionAvail(ctx)
     local commitW = r.ImGui_CalcTextSize(ctx, "Commit") + 16
@@ -6995,54 +6990,6 @@ local function drawUI_body()
         uiFlags.close = true
     end
 
-    if uiFlags.preview then
-        r.ImGui_SetNextWindowSize(ctx, 600, 400, r.ImGui_Cond_FirstUseEver())
-        local vis, open = r.ImGui_Begin(ctx, "Preview", true)
-        
-        if vis then
-            r.ImGui_TextWrapped(ctx, (function()
-                local previewText = {}
-                for i, mixTr in ipairs(mixTargets) do
-                    if validTrack(mixTr) then
-                        local slots = map[i] or {0}
-                        local chosen = {}
-                        for _, ri in ipairs(slots) do
-                            if ri and ri > 0 and recSources[ri] then chosen[#chosen + 1] = ri end
-                        end
-                        
-                        if #chosen > 0 then
-                            local mixName = nameCache[mixTr] or trName(mixTr)
-                            local keepName = (keepSet[mixName] == true)
-                            local firstEntry = recSources[chosen[1]]
-                            local targetBase = keepName and (firstEntry.name or mixName) or mixName
-                            
-                            previewText[#previewText + 1] = "Replace '" .. mixName .. "' with:"
-                            for s, ri in ipairs(chosen) do
-                                local entry = recSources[ri]
-                                local newName = (s == 1) and targetBase or (targetBase .. " (" .. s .. ")")
-                                previewText[#previewText + 1] = "  - " .. newName .. " (" .. (entry.src == "file" and "file" or "RPP") .. ")"
-                            end
-                            
-                            if normalizeMode and normMap[i] and normMap[i].profile ~= "-" then
-                                local profile = getProfileByName(normMap[i].profile)
-                                if profile then
-                                    local targetLUFS = calculateLUFS(normMap[i].targetPeak, profile.offset)
-                                    previewText[#previewText + 1] = "  -> Normalize: " .. normMap[i].profile .. 
-                                        " @ " .. normMap[i].targetPeak .. " dB peak (" .. 
-                                        string.format("%.1f", targetLUFS) .. " LUFS-M)"
-                                end
-                            end
-                        end
-                    end
-                end
-                return table.concat(previewText, "\n")
-            end)())
-        end
-        
-        r.ImGui_End(ctx)
-        if not open then uiFlags.preview = false end
-    end
-    
     -- ===== END IMPORT MODE =====
     
     -- ===== NORMALIZE-ONLY MODE UI =====

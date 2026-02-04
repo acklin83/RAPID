@@ -1884,7 +1884,7 @@ local function calculateRppLengthInMeasures(rppText, baseTempo)
     -- Convert time to beats then to measures
     -- beats = time * (bpm / 60)
     -- measures = beats / beatsPerMeasure
-    local beatsPerMeasure = baseTempo.num or 4
+    local beatsPerMeasure = (baseTempo.num or 4) * (4 / (baseTempo.denom or 4))
     local bpm = baseTempo.bpm or 120
 
     local totalBeats = maxEndTime * (bpm / 60)
@@ -2362,12 +2362,10 @@ local function setTempoViaAPI()
         r.SetCurrentBPM(0, allPoints[1].bpm, true)
     end
 
-    -- Add all tempo markers via API
+    -- Add all tempo markers via API using beat positions directly
+    -- (passing timepos=-1, measurepos=-1 lets REAPER use beatpos for placement)
     for _, pt in ipairs(allPoints) do
-        -- Convert beat position to time using current tempo map
-        local timePos = r.TimeMap2_beatsToTime(0, pt.pos)
-
-        r.SetTempoTimeSigMarker(0, -1, timePos, -1, -1,
+        r.SetTempoTimeSigMarker(0, -1, -1, -1, pt.pos,
             pt.bpm, pt.num, pt.denom, pt.linear)
     end
 
@@ -2811,13 +2809,16 @@ local function commitMultiRpp()
     r.TrackList_AdjustWindows(false)
 
     -- STEP 9: Save project, overwrite tempo section with full-fidelity plaintext, reload
-    writeMultiRppTempoSection()
-    local _, cur_path = r.EnumProjects(-1, "")
-    if cur_path and cur_path ~= "" then
-        log("\n=== Reloading project for full-fidelity tempo ===\n")
-        r.Undo_EndBlock("RAPID v" .. VERSION .. ": Multi-RPP Import", -1)
-        r.Main_openProject(cur_path)
-        return  -- Script closes due to reload
+    -- Only needed when tempo/markers were imported (importMarkers enabled)
+    if multiRppSettings.importMarkers then
+        writeMultiRppTempoSection()
+        local _, cur_path = r.EnumProjects(-1, "")
+        if cur_path and cur_path ~= "" then
+            log("\n=== Reloading project for full-fidelity tempo ===\n")
+            r.Undo_EndBlock("RAPID v" .. VERSION .. ": Multi-RPP Import", -1)
+            r.Main_openProject(cur_path)
+            return  -- Script closes due to reload
+        end
     end
 
     r.Undo_EndBlock("RAPID v" .. VERSION .. ": Multi-RPP Import", -1)

@@ -1868,7 +1868,7 @@ local function extractMarkersFromRpp(rppText)
 end
 
 -- Calculate RPP length in measures (finds last item end, rounds up to complete measure)
-local function calculateRppLengthInMeasures(rppText, baseTempo)
+local function calculateRppLengthInMeasures(rppText, baseTempo, tempoMap)
     local maxEndTime = 0
 
     -- Find all ITEM blocks and get POSITION + LENGTH
@@ -1881,17 +1881,57 @@ local function calculateRppLengthInMeasures(rppText, baseTempo)
         end
     end
 
-    -- Convert time to beats then to measures
-    -- beats = time * (bpm / 60)
-    -- measures = beats / beatsPerMeasure
-    local beatsPerMeasure = (baseTempo.num or 4) * (4 / (baseTempo.denom or 4))
-    local bpm = baseTempo.bpm or 120
+    -- Simple fallback if no tempo map with multiple points
+    if not tempoMap or #tempoMap < 2 then
+        local qnPerMeasure = (baseTempo.num or 4) * (4 / (baseTempo.denom or 4))
+        local bpm = baseTempo.bpm or 120
+        local totalBeats = maxEndTime * (bpm / 60)
+        return math.ceil(totalBeats / qnPerMeasure)
+    end
 
-    local totalBeats = maxEndTime * (bpm / 60)
-    local measures = totalBeats / beatsPerMeasure
+    -- Build segments: convert beat-based tempo points to time-based
+    -- Each segment has: time (seconds), pos (QN), bpm, num, denom
+    local segs = {}
+    local curNum, curDenom = baseTempo.num or 4, baseTempo.denom or 4
+    for i, pt in ipairs(tempoMap) do
+        if pt.num and pt.num > 0 then curNum = pt.num end
+        if pt.denom and pt.denom > 0 then curDenom = pt.denom end
+        local t
+        if i == 1 then
+            t = 0
+        else
+            local prev = segs[i - 1]
+            t = prev.time + (pt.pos - prev.pos) * 60 / prev.bpm
+        end
+        segs[i] = { time = t, pos = pt.pos, bpm = pt.bpm, num = curNum, denom = curDenom }
+    end
+
+    -- Convert maxEndTime (seconds) to beat position (QN)
+    local totalQN = 0
+    for i = #segs, 1, -1 do
+        local s = segs[i]
+        if maxEndTime >= s.time then
+            totalQN = s.pos + (maxEndTime - s.time) * (s.bpm / 60)
+            break
+        end
+    end
+
+    -- Convert totalQN to measures using time signature changes
+    local totalMeasures = 0
+    for i = 1, #segs do
+        local s = segs[i]
+        local nextQN = (i < #segs) and segs[i + 1].pos or totalQN
+        if nextQN > totalQN then nextQN = totalQN end
+        local qnInSeg = nextQN - s.pos
+        if qnInSeg > 0 then
+            local qnPerMeasure = s.num * (4 / s.denom)
+            totalMeasures = totalMeasures + qnInSeg / qnPerMeasure
+        end
+        if nextQN >= totalQN then break end
+    end
 
     -- Round up to complete measure
-    return math.ceil(measures)
+    return math.ceil(totalMeasures)
 end
 
 -- Load RPP into the multi-RPP queue
@@ -1911,7 +1951,7 @@ local function loadRppToQueue(path)
     local markers = extractMarkersFromRpp(txt)
 
     -- Calculate length in measures
-    local lengthInMeasures = calculateRppLengthInMeasures(txt, baseTempo)
+    local lengthInMeasures = calculateRppLengthInMeasures(txt, baseTempo, tempoMap)
     if lengthInMeasures < 1 then lengthInMeasures = 1 end
 
     -- Extract tracks (same as loadRecRPP)
@@ -2662,7 +2702,21 @@ local function commitMultiRpp()
                 chunk = fixChunkMediaPaths(chunk, settings.copyMedia)
                 recPath.dir = savedDir
 
-                -- Add POOLEDENV if needed
+                -- 4b: Shift item positions and envelope points in chunk before applying
+                -- (shifting via API after SetTrackStateChunk can fail inside PreventUIRefresh)
+                -- Must be done BEFORE adding POOLEDENV (pooled envs use beat-based positions)
+                if mp.offset > 0 then
+                    chunk = chunk:gsub("(\nPOSITION%s+)([%d%.%-]+)", function(prefix, pos)
+                        return prefix .. string.format("%.10f", tonumber(pos) + mp.offset)
+                    end)
+                    -- Shift envelope points (PT <time> ...) in track envelopes
+                    chunk = chunk:gsub("(\nPT%s+)([%d%.%-]+)", function(prefix, t)
+                        return prefix .. string.format("%.10f", tonumber(t) + mp.offset)
+                    end)
+                    log(string.format("  Shifted RPP %d chunk positions by %.2fs\n", mp.rppIdx, mp.offset))
+                end
+
+                -- Add POOLEDENV if needed (after shifting — pooled envs are beat-based, not shifted)
                 if mp.entry.pooledEnvs and #mp.entry.pooledEnvs > 0 then
                     local closingPos = chunk:find(">%s*$")
                     if closingPos then
@@ -2681,13 +2735,6 @@ local function commitMultiRpp()
                 r.SetMediaTrackInfo_Value(newTr, "I_RECARM", 0)
                 r.SetMediaTrackInfo_Value(newTr, "B_SHOWINMIXER", 1)
                 r.SetMediaTrackInfo_Value(newTr, "B_SHOWINTCP", 1)
-
-                -- 4b: Shift items and envelopes to RPP offset
-                if mp.offset > 0 then
-                    shiftTrackItemsBy(newTr, mp.offset)
-                    shiftTrackEnvelopesBy(newTr, mp.offset)
-                    log(string.format("  Shifted RPP %d track by %.2fs\n", mp.rppIdx, mp.offset))
-                end
 
                 importedTracks[#importedTracks + 1] = newTr
             end
@@ -5975,8 +6022,8 @@ local function drawUI_body()
 
                     -- Drag target (on the row)
                     if r.ImGui_BeginDragDropTarget(ctx) then
-                        local payload = r.ImGui_AcceptDragDropPayload(ctx, "RPP_QUEUE_ITEM")
-                        if payload then
+                        local rv, payload = r.ImGui_AcceptDragDropPayload(ctx, "RPP_QUEUE_ITEM")
+                        if rv then
                             dragTarget = i
                             local srcIdx = tonumber(payload)
                             if srcIdx and srcIdx ~= i then

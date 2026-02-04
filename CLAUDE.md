@@ -52,14 +52,14 @@
 - `keepMap` — track name preservation settings
 - `fxMap` — FX copying settings per slot
 - `editState` — inline editing: `.track` (edit key), `.buf` (InputText buffer), `.slotNames[i][s]` (custom names for duplicate slots)
-- `uiFlags` — UI booleans: `.preview`, `.settings`, `.help`, `.close`, `.winInit`
+- `uiFlags` — UI booleans: `.settings`, `.help`, `.close`, `.winInit`
 - `dragState` — drag-to-toggle: `.sel`, `.lock`, `.keepName`, `.keepFX`, `.lastClicked`
 - `selectedRows` — multi-select state (keyed by `"i_s"` format)
 - `deleteUnusedMode` — 0=keep unused, 1=delete unused (persisted in INI)
 - `calibrationWindow` — state for LUFS calibration popup (v2.4+)
 - `normProfiles` — array of profiles with optional per-profile LUFS settings (segmentSize, percentile, threshold)
 - `multiRppSettings` — `{enabled=false, gapInMeasures=2, createRegions=true, importMarkers=true}`
-- `rppQueue` — array of RPP entries: `{path, name, rppText, tracks[], baseTempo, tempoMap[], markers[], lengthInMeasures, startMeasure}`
+- `rppQueue` — array of RPP entries: `{path, name, rppText, tracks[], baseTempo, tempoMap[], markers[], lengthInMeasures, measureOffset, qnOffset}`
 - `multiMap` — mapping: `multiMap[mixIdx][rppIdx] = trackIdxInRpp` (0 = unmapped)
 - `multiNormMap` — normalization per template track: `multiNormMap[mixIdx] = {profile, targetPeak}`
 - `trackCache` — weak caches: `.kids` (folder has children), `.color` (effective track color)
@@ -91,7 +91,7 @@
 ## UI Details (v2.3+)
 
 - **Table columns (single-RPP import mode):** 10 columns — Sel, ##color (swatch), ##lock (drawn icon), Template Destinations, Recording Sources, Keep name, Keep FX, Normalize, Peak dB, x (+/- buttons)
-- **Table columns (multi-RPP import mode):** Lock, Template Destinations, [one column per RPP with dropdowns], Normalize, Peak dB — horizontal scrolling for many RPPs
+- **Table columns (multi-RPP import mode):** Lock, ##color (swatch), Template Destinations, [one column per RPP with dropdowns], Normalize, Peak dB — horizontal scrolling for many RPPs, dropdowns dim already-assigned tracks with `[-> target]` annotation
 - **Lock icon:** Drawn via `ImGui_DrawList` (filled rect body + rect shackle), not font-based — ReaImGui default font has no emoji support
 - **Editable track names:** Double-click Template Destination → inline `InputText`, saves on deactivation (not just Enter)
 - **Duplicate slots:** Created via "+" button, inherit normMap settings, independently renamable via `slotNameOverride`
@@ -111,6 +111,8 @@
 - Multi-RPP import (`commitMultiRpp()`) uses a different pipeline: API tempo → import all tracks → shift/consolidate → plaintext tempo overwrite → reload
 - Tempo import via API loses Shape/Tension — used only for positioning; plaintext overwrite at end restores full fidelity
 - All multi-RPP calculations are measure-based, not time-based (time is unreliable with changing tempos)
+- **Lua 200 local variable limit:** Main chunk is at ~195 locals. Adding new top-level `local` variables is dangerous — consolidate into existing tables or use forward declarations (which move, not add, locals). For-loop control variables consume 3 internal slots.
+- **Forward declarations:** 8 functions (`sanitizeChunk`, `fixChunkMediaPaths`, `postprocessTrackCopyRelink`, `copyFX`, `cloneSends`, `rewireReceives`, `copyTrackControls`, `shiftTrackItemsBy`) are forward-declared before `commitMultiRpp` because they're defined later in the file. Their definitions use `X = function(...)` assignment form (not `local function`).
 
 ## Normalization System (v2.4+)
 
@@ -135,8 +137,8 @@ Import multiple RPP recording session files into the same mix template. Each RPP
 
 ### RPP Queue
 
-- `rppQueue[]` entries contain: path, name, rppText, tracks[], baseTempo (bpm/num/denom), tempoMap[] (all tempo points), markers[], lengthInMeasures, startMeasure
-- `recalculateQueueOffsets()` computes measure-based start positions: each RPP starts after previous RPP's length + gap (in measures, default: 2), completing the last measure before gap
+- `rppQueue[]` entries contain: path, name, rppText, tracks[], baseTempo (bpm/num/denom), tempoMap[] (all tempo points), markers[], lengthInMeasures, measureOffset, qnOffset
+- `recalculateQueueOffsets()` computes both `measureOffset` (for UI) and `qnOffset` (QN position for all beat/time calculations, accumulated correctly across RPPs with different time signatures)
 - Drag-and-drop reordering via ImGui `DragDropSource`/`DragDropTarget`
 - JS_ReaScriptAPI multi-file dialog for loading multiple RPPs at once
 
@@ -144,9 +146,19 @@ Import multiple RPP recording session files into the same mix template. Each RPP
 
 - `extractBaseTempo(rppText)` — parses `TEMPO <bpm> <num> <denom>` line
 - `extractTempoMap(rppText)` — parses `TEMPO` line + `<TEMPOENVEX>` `PT` points; time signature encoded as `65536 * denom + num`
-- `buildMergedTempoSection()` — builds complete plaintext section (TEMPO line + MARKER lines + TEMPOENVEX with all PT points from all RPPs, offset by measure positions)
+- `buildMergedTempoSection()` — builds complete plaintext section (TEMPO line + MARKER lines + TEMPOENVEX with all PT points from all RPPs, offset by `qnOffset`)
 - `writeMultiRppTempoSection()` — saves project, reads .rpp file, replaces section between first `TEMPO` line and `<PROJBAY>`, writes back, reloads
 - Gap between RPPs inherits the last tempo from the preceding RPP
+
+### Beat Offset Calculation (qnOffset)
+
+**Critical:** Converting measure offsets to beat positions (quarter notes) requires accounting for time signatures. A measure in 6/8 has 3 QN (`6 * 4/8`), not 6. And each RPP may have a different time signature, so the global offset must accumulate QN from all preceding RPPs.
+
+Formula per measure: `qnPerMeasure = num * (4 / denom)`
+
+`recalculateQueueOffsets()` computes both `measureOffset` (for UI display) and `qnOffset` (for all beat/time calculations). All code that converts measure positions to beats MUST use `rpp.qnOffset`, never `rpp.measureOffset * (rpp.baseTempo.num or 4)`.
+
+After `setTempoViaAPI()` runs, REAPER's `TimeMap2_beatsToTime(0, qnOffset)` gives accurate time positions.
 
 ### Track Consolidation Pipeline (`commitMultiRpp()`)
 
@@ -171,7 +183,8 @@ Import multiple RPP recording session files into the same mix template. Each RPP
 - `shiftTrackEnvelopesBy(tr, delta)` — shifts all envelope points on a track by time delta
 - `moveItemsToTrack(srcTrack, destTrack)` — moves all media items between tracks via `MoveMediaItemToTrack`
 - `copyEnvelopePointsToTrack(srcTrack, destTrack)` — merges envelope points by matching envelope names
-- `measureToTime(measure, tempoMap, baseTempo)` — converts measure number to time position using tempo map
+- `measureToTime(measure)` — converts measure number to time via REAPER API (`TimeMap_GetMeasureInfo` → `TimeMap2_QNToTime`); only valid after `setTempoViaAPI()` has run
+- `autoMatchProfilesMulti()` — auto-matches normalize profiles to template tracks in multi-RPP mode (same alias + fuzzy logic as single-RPP `autoMatchProfiles`)
 
 ### Multi-RPP UI
 
@@ -179,7 +192,8 @@ Import multiple RPP recording session files into the same mix template. Each RPP
 - **Queue panel:** CollapsingHeader showing loaded RPPs with drag-drop reorder, editable names, measure info, remove buttons
 - **Settings row:** Gap (measures), Create regions, Import markers checkboxes
 - **Column-based mapping table:** One dropdown column per loaded RPP, horizontal scrolling (`ScrollX`) for many RPPs
-- **Auto-match:** Per-column and all-columns auto-matching via `multiRppAutoMatchColumn()` / `multiRppAutoMatchAll()`
+- **Auto-match:** Per-column and all-columns auto-matching via `multiRppAutoMatchColumn()` / `multiRppAutoMatchAll()` — uses same `calculateMatchScore` logic as single-RPP (exact/prefix/first-word/contains/fuzzy)
+- **Normalize match:** "Match" button in normalize column + included in "Match All" — uses `autoMatchProfilesMulti()` with alias + fuzzy matching
 
 ### Known Limitations (MVP)
 

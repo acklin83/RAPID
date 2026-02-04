@@ -310,6 +310,7 @@ rppQueue[i] = {
     tracks = {},                  -- Extracted track data (like recSources entries)
     lengthInMeasures = 0,         -- Length in measures (rounded up to complete measure)
     measureOffset = 0,            -- Start measure on timeline (calculated)
+    qnOffset = 0,                 -- Start position in quarter notes (accumulated correctly)
     tempoMap = {},                -- Extracted tempo/time-sig points
     markers = {},                 -- Extracted markers
     baseTempo = {bpm=120, num=4, denom=4},  -- Initial tempo
@@ -1952,6 +1953,7 @@ local function loadRppToQueue(path)
         tracks = tracks,
         lengthInMeasures = lengthInMeasures,
         measureOffset = 0,  -- Will be calculated
+        qnOffset = 0,       -- Will be calculated
         tempoMap = tempoMap,
         markers = markers,
         baseTempo = baseTempo,
@@ -2012,10 +2014,22 @@ end
 -- Calculate measure offsets for all RPPs in queue
 function recalculateQueueOffsets()
     local currentMeasure = 0
+    local currentQN = 0
 
     for i, rpp in ipairs(rppQueue) do
         rpp.measureOffset = currentMeasure
+        rpp.qnOffset = currentQN
+
+        -- QN per measure = num * (4 / denom), e.g. 6/8 = 3 QN, 4/4 = 4 QN
+        local num = rpp.baseTempo.num or 4
+        local denom = rpp.baseTempo.denom or 4
+        local qnPerMeasure = num * (4 / denom)
+
+        local rppQN = rpp.lengthInMeasures * qnPerMeasure
+        local gapQN = multiRppSettings.gapInMeasures * qnPerMeasure  -- gap inherits RPP's time sig
+
         currentMeasure = currentMeasure + rpp.lengthInMeasures + multiRppSettings.gapInMeasures
+        currentQN = currentQN + rppQN + gapQN
     end
 
     -- Rebuild recSources from all queued RPPs with rppIndex metadata
@@ -2053,19 +2067,6 @@ function rebuildRecSourcesFromQueue()
     _G.__recSources = recSources
 end
 
--- Convert measure position to time (seconds) given tempo map
-local function measureToTime(measure, tempoMap, baseTempo)
-    -- Simple conversion using base tempo (for now)
-    -- TODO: Handle tempo changes for accurate conversion
-    local beatsPerMeasure = baseTempo.num or 4
-    local bpm = baseTempo.bpm or 120
-
-    local beats = measure * beatsPerMeasure
-    local time = beats * (60 / bpm)
-
-    return time
-end
-
 -- Build merged tempo section text for project
 local function buildMergedTempoSection()
     if #rppQueue == 0 then return nil end
@@ -2080,7 +2081,7 @@ local function buildMergedTempoSection()
     -- Collect all markers with adjusted positions
     if multiRppSettings.importMarkers then
         for _, rpp in ipairs(rppQueue) do
-            local offsetTime = measureToTime(rpp.measureOffset, rpp.tempoMap, rpp.baseTempo)
+            local offsetTime = r.TimeMap2_beatsToTime(0, rpp.qnOffset)
 
             for _, m in ipairs(rpp.markers) do
                 local adjPos = m.pos + offsetTime
@@ -2096,9 +2097,9 @@ local function buildMergedTempoSection()
     if multiRppSettings.createRegions then
         local regionIdx = 900  -- High index to avoid conflicts
         for i, rpp in ipairs(rppQueue) do
-            local startTime = measureToTime(rpp.measureOffset, rpp.tempoMap, rpp.baseTempo)
-            local endMeasure = rpp.measureOffset + rpp.lengthInMeasures
-            local endTime = measureToTime(endMeasure, rpp.tempoMap, rpp.baseTempo)
+            local startTime = r.TimeMap2_beatsToTime(0, rpp.qnOffset)
+            local qnPerMeasure = (rpp.baseTempo.num or 4) * (4 / (rpp.baseTempo.denom or 4))
+            local endTime = r.TimeMap2_beatsToTime(0, rpp.qnOffset + rpp.lengthInMeasures * qnPerMeasure)
 
             lines[#lines + 1] = string.format('MARKER %d %.14g "%s" 1 %.14g 0',
                 regionIdx + i, startTime, rpp.name, endTime)
@@ -2109,7 +2110,7 @@ local function buildMergedTempoSection()
     local allPoints = {}
 
     for _, rpp in ipairs(rppQueue) do
-        local offsetBeats = rpp.measureOffset * (rpp.baseTempo.num or 4)
+        local offsetBeats = rpp.qnOffset
 
         for _, pt in ipairs(rpp.tempoMap) do
             local adjPos = pt.pos + offsetBeats
@@ -2340,11 +2341,11 @@ local function setTempoViaAPI()
     local allPoints = {}
 
     for _, rpp in ipairs(rppQueue) do
-        local offsetBeats = rpp.measureOffset * (rpp.baseTempo.num or 4)
+        local offsetBeats = rpp.qnOffset
 
         for _, pt in ipairs(rpp.tempoMap) do
             allPoints[#allPoints + 1] = {
-                pos = pt.pos + offsetBeats,  -- Position in beats
+                pos = pt.pos + offsetBeats,  -- Position in beats (QN)
                 bpm = pt.bpm,
                 num = pt.num or 0,
                 denom = pt.denom or 0,
@@ -2382,8 +2383,9 @@ local function createMultiRppRegions()
 
     for i, rpp in ipairs(rppQueue) do
         -- Convert measure positions to time using current (API-set) tempo
-        local startBeats = rpp.measureOffset * (rpp.baseTempo.num or 4)
-        local endBeats = (rpp.measureOffset + rpp.lengthInMeasures) * (rpp.baseTempo.num or 4)
+        local startBeats = rpp.qnOffset
+        local qnPerMeasure = (rpp.baseTempo.num or 4) * (4 / (rpp.baseTempo.denom or 4))
+        local endBeats = rpp.qnOffset + rpp.lengthInMeasures * qnPerMeasure
 
         local startTime = r.TimeMap2_beatsToTime(0, startBeats)
         local endTime = r.TimeMap2_beatsToTime(0, endBeats)
@@ -2401,8 +2403,7 @@ local function importMultiRppMarkers()
 
     for _, rpp in ipairs(rppQueue) do
         -- Calculate time offset for this RPP
-        local offsetBeats = rpp.measureOffset * (rpp.baseTempo.num or 4)
-        local offsetTime = r.TimeMap2_beatsToTime(0, offsetBeats)
+        local offsetTime = r.TimeMap2_beatsToTime(0, rpp.qnOffset)
 
         for _, m in ipairs(rpp.markers) do
             local adjPos = m.pos + offsetTime
@@ -2609,8 +2610,7 @@ local function commitMultiRpp()
     -- Read regions back (for offset lookup)
     local regionOffsets = {}  -- rppIdx -> startTime (seconds)
     for rppIdx, rpp in ipairs(rppQueue) do
-        local startBeats = rpp.measureOffset * (rpp.baseTempo.num or 4)
-        regionOffsets[rppIdx] = r.TimeMap2_beatsToTime(0, startBeats)
+        regionOffsets[rppIdx] = r.TimeMap2_beatsToTime(0, rpp.qnOffset)
         log(string.format("  RPP %d '%s' offset: %.2fs\n", rppIdx, rpp.name, regionOffsets[rppIdx]))
     end
 
@@ -5236,7 +5236,7 @@ local function commitMappings()
             local rppIdx = firstEntry.rppIndex or 1
             local rpp = rppQueue[rppIdx]
             if rpp then
-                _G.__mr_offset = measureToTime(rpp.measureOffset, rpp.tempoMap, rpp.baseTempo)
+                _G.__mr_offset = rpp.qnOffset * (60 / (rpp.baseTempo.bpm or 120))
             end
         else
             _G.__mr_offset = 0.0
@@ -5295,7 +5295,7 @@ local function commitMappings()
                 local rppIdx = entry.rppIndex or 1
                 local rpp = rppQueue[rppIdx]
                 if rpp then
-                    _G.__mr_offset = measureToTime(rpp.measureOffset, rpp.tempoMap, rpp.baseTempo)
+                    _G.__mr_offset = rpp.qnOffset * (60 / (rpp.baseTempo.bpm or 120))
                 end
             else
                 _G.__mr_offset = 0.0

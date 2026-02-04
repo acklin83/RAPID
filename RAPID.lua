@@ -5652,6 +5652,13 @@ local function drawUI_body()
         end
     end
 
+    if not multiRppSettings.enabled and recPath.rpp then
+        r.ImGui_SameLine(ctx)
+        if sec_button("Import Markers/Tempomap") then
+            importMarkersTempoPostCommit()
+        end
+    end
+
     -- RPP path info (single mode) or queue info (multi mode)
     if not multiRppSettings.enabled then
         if recPath.rpp then
@@ -5805,10 +5812,10 @@ local function drawUI_body()
         local COLFIX = r.ImGui_TableColumnFlags_WidthFixed()
 
         r.ImGui_TableSetupColumn(ctx, "##lock", COLFIX, 25.0)
-        r.ImGui_TableSetupColumn(ctx, "Template", 0, 150.0)
+        r.ImGui_TableSetupColumn(ctx, "Template", COLFIX, 150.0)
 
         for rppIdx, rpp in ipairs(rppQueue) do
-            r.ImGui_TableSetupColumn(ctx, rpp.name .. "##rpp" .. rppIdx, 0, 130.0)
+            r.ImGui_TableSetupColumn(ctx, rpp.name .. "##rpp" .. rppIdx, COLFIX, 130.0)
         end
 
         if normalizeMode then

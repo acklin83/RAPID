@@ -5989,7 +5989,7 @@ local function drawUI_body()
             if regChanged then multiRppSettings.createRegions = regVal end
 
             r.ImGui_SameLine(ctx)
-            local markChanged, markVal = r.ImGui_Checkbox(ctx, "Import markers", multiRppSettings.importMarkers)
+            local markChanged, markVal = r.ImGui_Checkbox(ctx, "Import Markers + Tempo Map", multiRppSettings.importMarkers)
             if markChanged then multiRppSettings.importMarkers = markVal end
 
             -- Queue table

@@ -163,19 +163,21 @@ After `setTempoViaAPI()` runs, REAPER's `TimeMap2_beatsToTime(0, qnOffset)` give
 ### Track Consolidation Pipeline (`commitMultiRpp()`)
 
 ```
-1. setTempoViaAPI() — rough tempo for positioning
-2. createMultiRppRegions() — one region per RPP (named from filename)
-3. importMultiRppMarkers() — markers with measure offsets
+1. setTempoViaAPI() — set tempo markers for correct positioning (uses beatpos parameter)
+2. createMultiRppRegions() — one region per RPP (gated on createRegions setting)
+3. importMultiRppMarkers() — markers with measure offsets (gated on importMarkers setting)
 4. For each template track with mappings:
-   a. Import all mapped RPP tracks (insertTrackFromRPP)
-   b. Shift items + envelopes to RPP's measure offset (shiftTrackEnvelopesBy)
-   c. Consolidate: move items + copy envelope points to first track
-   d. Copy FX/Sends from template track
-   e. Delete extra tracks + original template track
+   a. For each RPP: sanitize chunk, fix media paths
+   b. Shift POSITION + PT values in chunk text (gsub before SetTrackStateChunk)
+   c. Append POOLEDENV (after shifting — pooled envs use beat-based positions)
+   d. SetTrackStateChunk + postprocessTrackCopyRelink
+   e. Consolidate: move items + copy envelope points to first track
+   f. Copy FX/Sends from template track
+   g. Delete extra tracks + original template track
 5. Delete unused template tracks (if enabled)
 6. Normalize per region (uses auto-created RPP regions)
 7. Build peaks, minimize tracks
-8. writeMultiRppTempoSection() + reload for full-fidelity tempo
+8. writeMultiRppTempoSection() + reload (ONLY if importMarkers enabled)
 ```
 
 ### Key Helper Functions
@@ -183,14 +185,13 @@ After `setTempoViaAPI()` runs, REAPER's `TimeMap2_beatsToTime(0, qnOffset)` give
 - `shiftTrackEnvelopesBy(tr, delta)` — shifts all envelope points on a track by time delta
 - `moveItemsToTrack(srcTrack, destTrack)` — moves all media items between tracks via `MoveMediaItemToTrack`
 - `copyEnvelopePointsToTrack(srcTrack, destTrack)` — merges envelope points by matching envelope names
-- `measureToTime(measure)` — converts measure number to time via REAPER API (`TimeMap_GetMeasureInfo` → `TimeMap2_QNToTime`); only valid after `setTempoViaAPI()` has run
 - `autoMatchProfilesMulti()` — auto-matches normalize profiles to template tracks in multi-RPP mode (same alias + fuzzy logic as single-RPP `autoMatchProfiles`)
 
 ### Multi-RPP UI
 
 - **Toggle:** "Multi-RPP" checkbox in toolbar enables/disables multi-RPP mode
 - **Queue panel:** CollapsingHeader showing loaded RPPs with drag-drop reorder, editable names, measure info, remove buttons
-- **Settings row:** Gap (measures), Create regions, Import markers checkboxes
+- **Settings row:** Gap (measures), Create regions, Import Markers + Tempo Map checkboxes
 - **Column-based mapping table:** One dropdown column per loaded RPP, horizontal scrolling (`ScrollX`) for many RPPs
 - **Auto-match:** Per-column and all-columns auto-matching via `multiRppAutoMatchColumn()` / `multiRppAutoMatchAll()` — uses same `calculateMatchScore` logic as single-RPP (exact/prefix/first-word/contains/fuzzy)
 - **Normalize match:** "Match" button in normalize column + included in "Match All" — uses `autoMatchProfilesMulti()` with alias + fuzzy matching
@@ -199,6 +200,57 @@ After `setTempoViaAPI()` runs, REAPER's `TimeMap2_beatsToTime(0, qnOffset)` give
 
 - Send Envelopes and Pooled Automation items are not explicitly shifted (deferred to future version)
 - Pooled automation is copied as-is (works because it's pooled by reference)
+
+## OPEN BUG: Multi-RPP Item Positioning + Region Length (v2.5)
+
+**Status:** Unresolved — needs debugging in the next session.
+
+### Symptom
+
+When importing 2 RPPs (tested with "250927 Kulti" in 4/4 and "Pre Pro EP 2024" with tempo changes):
+
+1. **Items from RPP 2 are NOT shifted** — items like "03-Kik In-untitled.mp3" and "03-Kik In-Pre Pro EP 2024.mp3" appear at their original RPP-internal positions (starting at 0) instead of being offset to the RPP 2 region. Items at higher positions in RPP 2 (like "-01.mp3" items around measure 387) appear there by coincidence (their original position in RPP 2), NOT because they were shifted.
+2. **Region 2 is too short** — "Pre Pro EP 2024" region shows ~130 measures instead of 622 in the original RPP. Region 1 "Kulti" appears correct.
+3. **Regions START at correct positions** — the offset calculation (`qnOffset`) and region creation work. Only the LENGTH of RPP 2's region and the item POSITIONS are wrong.
+
+### What has been tried (and failed)
+
+1. **Chunk-based POSITION shifting** (current approach): Instead of shifting items via API (`shiftTrackItemsBy`) after `SetTrackStateChunk`, positions are now shifted directly in the chunk text via gsub BEFORE `SetTrackStateChunk`. Pattern: `(\n%s*POSITION%s+)([%d%.%-]+)`. The `%s*` was added to handle RPP indentation (lines like `\n      POSITION 10.5`). **Still doesn't work** — items remain unshifted.
+
+2. **`calculateRppLengthInMeasures` rewrite**: Replaced simple `maxEndTime * (bpm/60)` with full tempo map walk (converts time→beats→measures through each tempo segment). Also replaced the `<ITEM.-\n>` gmatch (which failed on indented RPP text because `\n>` only matches unindented closing brackets) with line-by-line POSITION/LENGTH scanning. **Region 2 is still too short** — suggests the tempo map walk or item scanning may still have issues.
+
+3. **`setTempoViaAPI` beatpos parameter**: Changed from converting beats→time per marker (`TimeMap2_beatsToTime` + timepos) to passing `beatpos` directly (`timepos=-1, measurepos=-1, beatpos=QN`). Regions are created correctly after this, so tempo markers are being set. **But this change hasn't been verified independently** — might need to revert to timepos approach if beatpos doesn't work reliably in all REAPER versions.
+
+### Investigation plan for next session
+
+**Priority 1: Debug the gsub POSITION shifting**
+- Add `log()` calls to verify `mp.offset` is non-zero for RPP 2
+- Log the count of gsub replacements: `local count; chunk, count = chunk:gsub(...); log("shifted "..count.." positions")`
+- If count is 0: dump first 500 chars of chunk to log to see actual format (indentation, line endings)
+- If count > 0 but items still unshifted: check if `SetTrackStateChunk` silently fails (check return value)
+
+**Priority 2: Debug region length calculation**
+- Log `maxEndTime` from `calculateRppLengthInMeasures` for RPP 2 to verify item scanning finds all items
+- Log tempo map segment count and total measures calculation
+- Compare against manual item count in the RPP file
+
+**Priority 3: Verify setTempoViaAPI**
+- Check if reverting to `timepos` approach (with `TimeMap2_beatsToTime` conversion) fixes anything
+- The cascading conversion should work correctly when markers are added in order (each marker only affects tempo after its position)
+
+### Key code locations
+
+- Chunk POSITION shifting: `commitMultiRpp()` step 4b (~line 2708)
+- `calculateRppLengthInMeasures()`: ~line 1871
+- `setTempoViaAPI()`: ~line 2328
+- `recalculateQueueOffsets()`: ~line 2055
+- `createMultiRppRegions()`: ~line 2418
+- `extractTrackChunks()`: ~line 1325 (how chunks are stored — preserves RPP indentation)
+- `sanitizeChunk()`: ~line 3620 (note: its `\n` patterns also lack `%s*` but this doesn't matter because properties are later set via API)
+
+### RPP chunk indentation context
+
+RPP files are indented (2 spaces per nesting level). `extractTrackChunks()` preserves original indentation. Inside a track chunk, item POSITION lines look like `\n      POSITION 10.5` (6+ spaces). Any gsub pattern matching chunk content MUST use `%s*` between `\n` and the keyword. `sanitizeChunk()` patterns (`\nI_FOLDERDEPTH`, `\nRECARM`, etc.) lack `%s*` but this is harmless because those properties are set later via REAPER API.
 
 ## Resolved Issues
 

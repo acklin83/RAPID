@@ -58,7 +58,7 @@
 - `deleteUnusedMode` — 0=keep unused, 1=delete unused (persisted in INI)
 - `calibrationWindow` — state for LUFS calibration popup (v2.4+)
 - `normProfiles` — array of profiles with optional per-profile LUFS settings (segmentSize, percentile, threshold)
-- `multiRppSettings` — `{enabled=false, gapInMeasures=2, createRegions=true, importMarkers=true}`
+- `multiRppSettings` — `{enabled=false, gapInMeasures=2, createRegions=true, importMarkers=true, alignLanes=true}`
 - `rppQueue` — array of RPP entries: `{path, name, rppText, tracks[], baseTempo, tempoMap[], markers[], lengthInMeasures, measureOffset, qnOffset}`
 - `multiMap` — mapping: `multiMap[mixIdx][rppIdx] = trackIdxInRpp` (0 = unmapped)
 - `multiNormMap` — normalization per template track: `multiNormMap[mixIdx] = {profile, targetPeak}`
@@ -93,7 +93,7 @@
 - **Table columns (single-RPP import mode):** 10 columns — Sel, ##color (swatch), ##lock (drawn icon), Template Destinations, Recording Sources, Keep name, Keep FX, Normalize, Peak dB, x (+/- buttons)
 - **Table columns (multi-RPP import mode):** Lock, ##color (swatch), Template Destinations, [one column per RPP with dropdowns], Normalize, Peak dB — horizontal scrolling for many RPPs, dropdowns dim already-assigned tracks with `[-> target]` annotation
 - **Lock icon:** Drawn via `ImGui_DrawList` (filled rect body + rect shackle), not font-based — ReaImGui default font has no emoji support
-- **Editable track names:** Double-click Template Destination → inline `InputText`, saves on deactivation (not just Enter)
+- **Editable track names:** Double-click Template Destination → inline `InputText`, saves on deactivation (not just Enter). Works in both single-RPP and multi-RPP mode.
 - **Duplicate slots:** Created via "+" button, inherit normMap settings, independently renamable via `slotNameOverride`
 - **Delete unused toggle:** Single checkbox, hides rows (not just dims), respects locked tracks and folders with content
 - **Folder visibility:** Pre-computed `folderHasContent` via parent stack walk — folders only shown if they contain children with sources or locked children
@@ -112,7 +112,7 @@
 - Tempo import via API loses Shape/Tension — used only for positioning; plaintext overwrite at end restores full fidelity
 - All multi-RPP calculations are measure-based, not time-based (time is unreliable with changing tempos)
 - **Lua 200 local variable limit:** Main chunk is at ~195 locals. Adding new top-level `local` variables is dangerous — consolidate into existing tables or use forward declarations (which move, not add, locals). For-loop control variables consume 3 internal slots.
-- **Forward declarations:** 8 functions (`sanitizeChunk`, `fixChunkMediaPaths`, `postprocessTrackCopyRelink`, `copyFX`, `cloneSends`, `rewireReceives`, `copyTrackControls`, `shiftTrackItemsBy`) are forward-declared before `commitMultiRpp` because they're defined later in the file. Their definitions use `X = function(...)` assignment form (not `local function`).
+- **Forward declarations:** 9 functions (`sanitizeChunk`, `fixChunkMediaPaths`, `postprocessTrackCopyRelink`, `copyFX`, `cloneSends`, `rewireReceives`, `copyTrackControls`, `shiftTrackItemsBy`, `replaceGroupFlagsInChunk`) are forward-declared before `commitMultiRpp` because they're defined later in the file. Their definitions use `X = function(...)` assignment form (not `local function`).
 
 ## Normalization System (v2.4+)
 
@@ -146,8 +146,9 @@ Import multiple RPP recording session files into the same mix template. Each RPP
 
 - `extractBaseTempo(rppText)` — parses `TEMPO <bpm> <num> <denom>` line
 - `extractTempoMap(rppText)` — parses `TEMPO` line + `<TEMPOENVEX>` `PT` points; time signature encoded as `65536 * denom + num`
-- `buildMergedTempoSection()` — builds complete plaintext section (TEMPO line + MARKER lines + TEMPOENVEX with all PT points from all RPPs, offset by `qnOffset`)
-- `writeMultiRppTempoSection()` — saves project, reads .rpp file, replaces section between first `TEMPO` line and `<PROJBAY>`, writes back, reloads
+- `extractMarkersFromRpp(rppText)` — parses MARKER lines from .rpp; pairs region start+end markers (same idx) into single entries with `rgnend`
+- `buildMergedTempoSection()` — builds plaintext section (TEMPO line + TEMPOENVEX with all PT points from all RPPs, offset by `qnOffset`). Does NOT write MARKER lines — those are created via API and preserved from the saved .rpp
+- `writeMultiRppTempoSection()` — saves project, reads .rpp file, replaces TEMPO+TEMPOENVEX section while preserving existing MARKER lines (between TEMPOENVEX end and `<PROJBAY>`), writes back, reloads
 - Gap between RPPs inherits the last tempo from the preceding RPP
 
 ### Beat Offset Calculation (qnOffset)
@@ -170,9 +171,10 @@ After `setTempoViaAPI()` runs, REAPER's `TimeMap2_beatsToTime(0, qnOffset)` give
    a. For each RPP: sanitize chunk, fix media paths
    b. Shift POSITION + PT values in chunk text (gsub before SetTrackStateChunk)
    c. Append POOLEDENV (after shifting — pooled envs use beat-based positions)
-   d. SetTrackStateChunk + postprocessTrackCopyRelink
+   d. SetTrackStateChunk (with return value check) + postprocessTrackCopyRelink
    e. Consolidate: move items + copy envelope points to first track
-   f. Copy FX/Sends from template track
+   e2. Align lanes: move all items to highest lane for visibility (gated on alignLanes setting)
+   f. Copy FX/Sends/Groups from template track (includes GROUP_FLAGS via replaceGroupFlagsInChunk)
    g. Delete extra tracks + original template track
 5. Delete unused template tracks (if enabled)
 6. Normalize per region (uses auto-created RPP regions)
@@ -191,7 +193,7 @@ After `setTempoViaAPI()` runs, REAPER's `TimeMap2_beatsToTime(0, qnOffset)` give
 
 - **Toggle:** "Multi-RPP" checkbox in toolbar enables/disables multi-RPP mode
 - **Queue panel:** CollapsingHeader showing loaded RPPs with drag-drop reorder, editable names, measure info, remove buttons
-- **Settings row:** Gap (measures), Create regions, Import Markers + Tempo Map checkboxes
+- **Settings row:** Gap (measures), Create regions, Import Markers + Tempo Map, Align lanes checkboxes
 - **Column-based mapping table:** One dropdown column per loaded RPP, horizontal scrolling (`ScrollX`) for many RPPs
 - **Auto-match:** Per-column and all-columns auto-matching via `multiRppAutoMatchColumn()` / `multiRppAutoMatchAll()` — uses same `calculateMatchScore` logic as single-RPP (exact/prefix/first-word/contains/fuzzy)
 - **Normalize match:** "Match" button in normalize column + included in "Match All" — uses `autoMatchProfilesMulti()` with alias + fuzzy matching
@@ -201,58 +203,29 @@ After `setTempoViaAPI()` runs, REAPER's `TimeMap2_beatsToTime(0, qnOffset)` give
 - Send Envelopes and Pooled Automation items are not explicitly shifted (deferred to future version)
 - Pooled automation is copied as-is (works because it's pooled by reference)
 
-## OPEN BUG: Multi-RPP Item Positioning + Region Length (v2.5)
+## FIXED BUG: Multi-RPP Item Positioning + Region Length (v2.5)
 
-**Status:** Unresolved — needs debugging in the next session.
+**Status:** Fixed — needs manual testing in REAPER to confirm.
 
-### Symptom
+### Root Causes Found
 
-When importing 2 RPPs (tested with "250927 Kulti" in 4/4 and "Pre Pro EP 2024" with tempo changes):
+1. **`extractTempoMap()` line 1794**: `rppText:match("<TEMPOENVEX.-\n>")` used Lua's `.-` which cannot match newlines. Multi-line TEMPOENVEX blocks were never extracted, so only base tempo was returned. This caused `calculateRppLengthInMeasures()` to use the fallback constant-BPM formula, producing wrong lengths for RPPs with tempo changes. **Fixed** by replacing with `find/sub` extraction.
 
-1. **Items from RPP 2 are NOT shifted** — items like "03-Kik In-untitled.mp3" and "03-Kik In-Pre Pro EP 2024.mp3" appear at their original RPP-internal positions (starting at 0) instead of being offset to the RPP 2 region. Items at higher positions in RPP 2 (like "-01.mp3" items around measure 387) appear there by coincidence (their original position in RPP 2), NOT because they were shifted.
-2. **Region 2 is too short** — "Pre Pro EP 2024" region shows ~130 measures instead of 622 in the original RPP. Region 1 "Kulti" appears correct.
-3. **Regions START at correct positions** — the offset calculation (`qnOffset`) and region creation work. Only the LENGTH of RPP 2's region and the item POSITIONS are wrong.
+2. **`sanitizeChunk()` lines 3679-3688**: Patterns like `\nAUXRECV.-\n` didn't match indented RPP lines (e.g., `\n    AUXRECV ...`). Stale AUXRECV/HWOUT entries referencing non-existent tracks could cause `SetTrackStateChunk` to silently fail. **Fixed** by adding `%s*` after `\n` in all patterns.
 
-### What has been tried (and failed)
+3. **`commitMultiRpp()` line 2745**: `SetTrackStateChunk` return value was not checked, hiding failures. **Fixed** with return value check and warning log.
 
-1. **Chunk-based POSITION shifting** (current approach): Instead of shifting items via API (`shiftTrackItemsBy`) after `SetTrackStateChunk`, positions are now shifted directly in the chunk text via gsub BEFORE `SetTrackStateChunk`. Pattern: `(\n%s*POSITION%s+)([%d%.%-]+)`. The `%s*` was added to handle RPP indentation (lines like `\n      POSITION 10.5`). **Still doesn't work** — items remain unshifted.
-
-2. **`calculateRppLengthInMeasures` rewrite**: Replaced simple `maxEndTime * (bpm/60)` with full tempo map walk (converts time→beats→measures through each tempo segment). Also replaced the `<ITEM.-\n>` gmatch (which failed on indented RPP text because `\n>` only matches unindented closing brackets) with line-by-line POSITION/LENGTH scanning. **Region 2 is still too short** — suggests the tempo map walk or item scanning may still have issues.
-
-3. **`setTempoViaAPI` beatpos parameter**: Changed from converting beats→time per marker (`TimeMap2_beatsToTime` + timepos) to passing `beatpos` directly (`timepos=-1, measurepos=-1, beatpos=QN`). Regions are created correctly after this, so tempo markers are being set. **But this change hasn't been verified independently** — might need to revert to timepos approach if beatpos doesn't work reliably in all REAPER versions.
-
-### Investigation plan for next session
-
-**Priority 1: Debug the gsub POSITION shifting**
-- Add `log()` calls to verify `mp.offset` is non-zero for RPP 2
-- Log the count of gsub replacements: `local count; chunk, count = chunk:gsub(...); log("shifted "..count.." positions")`
-- If count is 0: dump first 500 chars of chunk to log to see actual format (indentation, line endings)
-- If count > 0 but items still unshifted: check if `SetTrackStateChunk` silently fails (check return value)
-
-**Priority 2: Debug region length calculation**
-- Log `maxEndTime` from `calculateRppLengthInMeasures` for RPP 2 to verify item scanning finds all items
-- Log tempo map segment count and total measures calculation
-- Compare against manual item count in the RPP file
-
-**Priority 3: Verify setTempoViaAPI**
-- Check if reverting to `timepos` approach (with `TimeMap2_beatsToTime` conversion) fixes anything
-- The cascading conversion should work correctly when markers are added in order (each marker only affects tempo after its position)
-
-### Key code locations
-
-- Chunk POSITION shifting: `commitMultiRpp()` step 4b (~line 2708)
-- `calculateRppLengthInMeasures()`: ~line 1871
-- `setTempoViaAPI()`: ~line 2328
-- `recalculateQueueOffsets()`: ~line 2055
-- `createMultiRppRegions()`: ~line 2418
-- `extractTrackChunks()`: ~line 1325 (how chunks are stored — preserves RPP indentation)
-- `sanitizeChunk()`: ~line 3620 (note: its `\n` patterns also lack `%s*` but this doesn't matter because properties are later set via API)
-
-### RPP chunk indentation context
-
-RPP files are indented (2 spaces per nesting level). `extractTrackChunks()` preserves original indentation. Inside a track chunk, item POSITION lines look like `\n      POSITION 10.5` (6+ spaces). Any gsub pattern matching chunk content MUST use `%s*` between `\n` and the keyword. `sanitizeChunk()` patterns (`\nI_FOLDERDEPTH`, `\nRECARM`, etc.) lack `%s*` but this is harmless because those properties are set later via REAPER API.
+4. **Diagnostic logging added**: gsub replacement counts for POSITION and PT values are now logged to help verify shifting works correctly.
 
 ## Resolved Issues
+
+**Fixed (v2.5): Multi-RPP marker/region duplication and wrong positions**
+
+- Root cause 1: `extractMarkersFromRpp()` treated both region-start and region-end MARKER lines as separate entries, creating duplicate regions with `rgnend=0`
+- Root cause 2: `buildMergedTempoSection()` wrote MARKER lines in wrong format (REAPER uses `MARKER idx pos "name" flags [0 colortype colorflag {GUID} 0]`, not `MARKER idx pos "name" isRegion rgnend color`)
+- Root cause 3: `writeMultiRppTempoSection()` replaced everything between TEMPO and `<PROJBAY>`, deleting API-created MARKER lines
+- RPP format insight: Regions use TWO MARKER lines (start with name + end without name, same index). MARKER lines come AFTER TEMPOENVEX, before `<PROJBAY>`. Flags field is a bitmask (bit 0 = isRegion). Region-end lines have shortened format: `MARKER idx pos "" flags`
+- Fix: (1) `extractMarkersFromRpp()` now pairs region-end markers with start markers to set `rgnend`, skips end-markers from output. (2) `buildMergedTempoSection()` no longer writes MARKER lines — API-created markers are preserved. (3) `writeMultiRppTempoSection()` extracts and re-inserts MARKER lines when replacing TEMPO+TEMPOENVEX section
 
 **Fixed (v2.3): Imported RPP media items showed as "offline"**
 
@@ -274,7 +247,7 @@ RPP files are indented (2 spaces per nesting level). `extractTrackChunks()` pres
 - v2.3 (Feb 2026): Editable track names, duplicate slot improvements, delete unused toggle, offline media fix, DrawList lock icon, help text rewrite
 - v2.3.1 (Feb 2026): Import speed optimization — cached chunks, removed redundant UI updates, targeted peak/media operations, deduplicated norm lookup
 - v2.4 (Feb 2026): LUFS Calibration System — measure reference items to create/update profiles, per-profile LUFS settings, gain reset before normalization
-- v2.5 (Feb 2026): Multi-RPP Import — import multiple RPP files into same template, merged tempo/markers, measure-based offsets, track consolidation, column-based UI
+- v2.5 (Feb 2026): Multi-RPP Import — import multiple RPP files into same template, merged tempo/markers, measure-based offsets, track consolidation, column-based UI, lane alignment, group flag copying, editable template track names
 
 ## Files
 

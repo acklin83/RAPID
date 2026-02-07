@@ -323,6 +323,7 @@ local multiRppSettings = {
     gapInMeasures = 2,            -- Gap between RPPs in measures (default: 2)
     createRegions = true,         -- Create region per RPP
     importMarkers = true,         -- Import markers from all RPPs
+    alignLanes = true,            -- Move items to highest lane for visibility across RPPs
 }
 
 -- Caches (grouped to reduce local count)
@@ -644,6 +645,7 @@ local function saveIni()
     f:write("GapInMeasures=" .. tostring(multiRppSettings.gapInMeasures) .. "\n")
     f:write("CreateRegions=" .. tostring(multiRppSettings.createRegions) .. "\n")
     f:write("ImportMarkers=" .. tostring(multiRppSettings.importMarkers) .. "\n")
+    f:write("AlignLanes=" .. tostring(multiRppSettings.alignLanes) .. "\n")
 
     f:close()
 end
@@ -848,6 +850,7 @@ local function loadIni()
     multiRppSettings.gapInMeasures = parseMultiRppInt("GapInMeasures", 2)
     multiRppSettings.createRegions = parseMultiRppBool("CreateRegions", true)
     multiRppSettings.importMarkers = parseMultiRppBool("ImportMarkers", true)
+    multiRppSettings.alignLanes = parseMultiRppBool("AlignLanes", true)
 
     -- Sync global mode variables
     importMode = settings.importMode
@@ -1791,7 +1794,15 @@ local function extractTempoMap(rppText)
     }
 
     -- Extract TEMPOENVEX points if present
-    local envex = rppText:match("<TEMPOENVEX.-\n>")
+    -- Note: Lua's .- does not match newlines, so we use find/sub for multi-line blocks
+    local envexStart = rppText:find("<TEMPOENVEX\n")
+    local envex = nil
+    if envexStart then
+        local envexEnd = rppText:find("\n>", envexStart)
+        if envexEnd then
+            envex = rppText:sub(envexStart, envexEnd + 1)
+        end
+    end
     if envex then
         for line in envex:gmatch("PT%s+([^\n]+)") do
             -- Format: PT <pos> <bpm> <shape> <tension> [<timesig>] [<flags>]
@@ -1830,37 +1841,68 @@ local function extractTempoMap(rppText)
 end
 
 -- Extract markers from RPP text
+-- RPP MARKER format: MARKER <idx> <pos> "<name>" <flags> [0 <colortype> <colorflag> {GUID} 0]
+-- Regions use TWO MARKER lines: start (with name, flags bit0=1) + end (empty name "", same idx)
+-- Region-end lines have shortened format: MARKER <idx> <pos> "" <flags>
 local function extractMarkersFromRpp(rppText)
-    local markers = {}
+    local allEntries = {}
 
     for line in rppText:gmatch("[^\r\n]+") do
         if line:match("^%s*MARKER%s+") then
-            -- MARKER <idx> <pos> "<name>" <isrgn> <rgnend> [<color>]
-            local idx, pos, rest = line:match("^%s*MARKER%s+(%S+)%s+([%d%.]+)%s+(.+)")
+            local idx, pos, rest = line:match("^%s*MARKER%s+(%S+)%s+([%d%.%-]+)%s+(.+)")
             if idx and pos and rest then
                 local name, afterName = rest:match('^"([^"]*)"(.*)')
                 if not name then
                     name, afterName = rest:match("^(%S+)(.*)")
                 end
 
-                local isrgn, rgnend, color = 0, 0, 0
+                local flags, color = 0, 0
                 if afterName then
                     local parts = {}
                     for p in afterName:gmatch("%S+") do parts[#parts + 1] = p end
-                    isrgn = tonumber(parts[1]) or 0
-                    rgnend = tonumber(parts[2]) or 0
+                    flags = tonumber(parts[1]) or 0
+                    -- Color info is at parts[3] (after "0 <colortype>") if present
+                    -- Full format: flags 0 colortype colorflag {GUID} 0
+                    -- For API import we only need the color value from REAPER's native format
                     color = tonumber(parts[3]) or 0
                 end
 
-                markers[#markers + 1] = {
+                local isRegion = (flags % 2 == 1)  -- bit 0 = isRegion
+
+                allEntries[#allEntries + 1] = {
                     idx = tonumber(idx),
-                    pos = tonumber(pos),  -- Position in seconds (time-based in source RPP)
+                    pos = tonumber(pos),
                     name = name or "",
-                    isRegion = (isrgn == 1),
-                    rgnend = rgnend,
+                    isRegion = isRegion,
+                    flags = flags,
+                    rgnend = 0,
                     color = color
                 }
             end
+        end
+    end
+
+    -- Second pass: pair region-end markers with their start markers
+    -- Region-end markers have empty name "" and same idx as their start
+    local regionStarts = {}  -- idx -> entry (last seen start for this idx)
+    for _, m in ipairs(allEntries) do
+        if m.isRegion and m.name ~= "" then
+            regionStarts[m.idx] = m
+        end
+    end
+
+    -- Filter: remove end-markers and set rgnend on matching starts
+    local markers = {}
+    for _, m in ipairs(allEntries) do
+        if m.isRegion and m.name == "" then
+            -- This is a region-end marker — set rgnend on matching start
+            local startEntry = regionStarts[m.idx]
+            if startEntry then
+                startEntry.rgnend = m.pos
+            end
+            -- Don't add to output (skip region-end markers)
+        else
+            markers[#markers + 1] = m
         end
     end
 
@@ -2122,33 +2164,10 @@ local function buildMergedTempoSection()
     lines[#lines + 1] = string.format("TEMPO %.14g %d %d",
         firstTempo.bpm, firstTempo.num, firstTempo.denom)
 
-    -- Collect all markers with adjusted positions
-    if multiRppSettings.importMarkers then
-        for _, rpp in ipairs(rppQueue) do
-            local offsetTime = r.TimeMap2_beatsToTime(0, rpp.qnOffset)
-
-            for _, m in ipairs(rpp.markers) do
-                local adjPos = m.pos + offsetTime
-                local adjEnd = m.rgnend + offsetTime
-
-                lines[#lines + 1] = string.format('MARKER %d %.14g "%s" %d %.14g %d',
-                    m.idx, adjPos, m.name, m.isRegion and 1 or 0, adjEnd, m.color)
-            end
-        end
-    end
-
-    -- Create regions for each RPP if enabled
-    if multiRppSettings.createRegions then
-        local regionIdx = 900  -- High index to avoid conflicts
-        for i, rpp in ipairs(rppQueue) do
-            local startTime = r.TimeMap2_beatsToTime(0, rpp.qnOffset)
-            local qnPerMeasure = (rpp.baseTempo.num or 4) * (4 / (rpp.baseTempo.denom or 4))
-            local endTime = r.TimeMap2_beatsToTime(0, rpp.qnOffset + rpp.lengthInMeasures * qnPerMeasure)
-
-            lines[#lines + 1] = string.format('MARKER %d %.14g "%s" 1 %.14g 0',
-                regionIdx + i, startTime, rpp.name, endTime)
-        end
-    end
+    -- NOTE: MARKER lines are NOT written here. They are created via API
+    -- (createMultiRppRegions + importMultiRppMarkers) and REAPER writes them
+    -- to the .rpp on save. writeMultiRppTempoSection() preserves existing
+    -- MARKER lines from the saved .rpp when replacing TEMPO+TEMPOENVEX.
 
     -- Build TEMPOENVEX with all tempo points from all RPPs
     local allPoints = {}
@@ -2249,8 +2268,20 @@ local function writeMultiRppTempoSection()
         return
     end
 
-    -- Build new project text
-    local new_txt = cur_txt:sub(1, cur_tempo_start - 1) .. mergedSection .. "\n" .. cur_txt:sub(cur_projbay_start)
+    -- Extract existing MARKER lines from the TEMPO-to-PROJBAY section
+    -- (REAPER writes API-created markers/regions here on save)
+    local tempoToProjbay = cur_txt:sub(cur_tempo_start, cur_projbay_start - 1)
+    local existingMarkers = {}
+    for line in tempoToProjbay:gmatch("[^\n]+") do
+        if line:match("^%s*MARKER%s+") then
+            existingMarkers[#existingMarkers + 1] = line
+        end
+    end
+    local markerBlock = (#existingMarkers > 0) and (table.concat(existingMarkers, "\n") .. "\n") or ""
+    log(string.format("  Preserved %d MARKER lines from saved .rpp\n", #existingMarkers))
+
+    -- Build new project text: TEMPO+TEMPOENVEX (from mergedSection) + preserved MARKERs + rest
+    local new_txt = cur_txt:sub(1, cur_tempo_start - 1) .. mergedSection .. "\n" .. markerBlock .. cur_txt:sub(cur_projbay_start)
 
     -- Backup
     local backup = cur_path .. ".backup_before_multirpp.rpp"
@@ -2627,6 +2658,7 @@ local cloneSends
 local rewireReceives
 local copyTrackControls
 local shiftTrackItemsBy
+local replaceGroupFlagsInChunk
 
 -- ===== MULTI-RPP COMMIT FLOW =====
 local function commitMultiRpp()
@@ -2688,6 +2720,10 @@ local function commitMultiRpp()
         local mixIdx = idxOf(mixTr)
         local mixDepth = folderDepth(mixTr)
 
+        -- Extract template GROUP_FLAGS for later application (same as single-RPP)
+        local _, templateChunk = r.GetTrackStateChunk(mixTr, "", false)
+        local templateGroupFlags = templateChunk:match("(GROUP_FLAGS[^\r\n]*)")
+
         log(string.format("\n--- Template: '%s' (%d RPP mappings) ---\n", mixName, #mappedRpps))
 
         -- 4a: Import all mapped tracks (insert after template)
@@ -2710,14 +2746,16 @@ local function commitMultiRpp()
                 -- (shifting via API after SetTrackStateChunk can fail inside PreventUIRefresh)
                 -- Must be done BEFORE adding POOLEDENV (pooled envs use beat-based positions)
                 if mp.offset > 0 then
-                    chunk = chunk:gsub("(\n%s*POSITION%s+)([%d%.%-]+)", function(prefix, pos)
+                    local posCount, ptCount
+                    chunk, posCount = chunk:gsub("(\n%s*POSITION%s+)([%d%.%-]+)", function(prefix, pos)
                         return prefix .. string.format("%.10f", tonumber(pos) + mp.offset)
                     end)
                     -- Shift envelope points (PT <time> ...) in track envelopes
-                    chunk = chunk:gsub("(\n%s*PT%s+)([%d%.%-]+)", function(prefix, t)
+                    chunk, ptCount = chunk:gsub("(\n%s*PT%s+)([%d%.%-]+)", function(prefix, t)
                         return prefix .. string.format("%.10f", tonumber(t) + mp.offset)
                     end)
-                    log(string.format("  Shifted RPP %d chunk positions by %.2fs\n", mp.rppIdx, mp.offset))
+                    log(string.format("  Shifted RPP %d: %d POSITIONs, %d PTs by %.2fs\n",
+                        mp.rppIdx, posCount, ptCount, mp.offset))
                 end
 
                 -- Add POOLEDENV if needed (after shifting — pooled envs are beat-based, not shifted)
@@ -2732,7 +2770,11 @@ local function commitMultiRpp()
                     end
                 end
 
-                r.SetTrackStateChunk(newTr, chunk, false)
+                local chunkOk = r.SetTrackStateChunk(newTr, chunk, false)
+                if not chunkOk then
+                    log(string.format("  WARNING: SetTrackStateChunk FAILED for RPP %d track '%s'\n",
+                        mp.rppIdx, mp.entry.name or "?"))
+                end
                 postprocessTrackCopyRelink(newTr, settings.copyMedia)
 
                 r.SetMediaTrackInfo_Value(newTr, "I_FOLDERDEPTH", 0)
@@ -2746,6 +2788,71 @@ local function commitMultiRpp()
 
         if #importedTracks == 0 then goto nextTemplate end
 
+        -- 4c.pre: Align lanes for visibility across imported tracks (BEFORE consolidation)
+        -- When RPPs have different numbers of fixed lanes (e.g. Kulti=2 lanes, Mels=3 lanes),
+        -- items on the active lane of each RPP need to be copied to the highest active lane
+        -- so all are visible after consolidation. Original lanes are preserved.
+        if multiRppSettings.alignLanes and #importedTracks > 1 then
+            local maxActiveLane = 0
+            local trackActiveLanes = {}
+
+            for t, tr in ipairs(importedTracks) do
+                if validTrack(tr) then
+                    -- Find the highest lane with items on this track
+                    local highestLane = 0
+                    local cnt = r.CountTrackMediaItems(tr)
+                    for idx = 0, cnt - 1 do
+                        local item = r.GetTrackMediaItem(tr, idx)
+                        local lane = r.GetMediaItemInfo_Value(item, "I_FIXEDLANE")
+                        if lane > highestLane then highestLane = lane end
+                    end
+
+                    -- Find which lane is active (check from highest down)
+                    local activeLane = 0
+                    for lane = highestLane, 0, -1 do
+                        local plays = r.GetMediaTrackInfo_Value(tr, "C_LANEPLAYS:" .. lane)
+                        if plays == 1 then
+                            activeLane = lane
+                            break
+                        end
+                    end
+
+                    trackActiveLanes[t] = activeLane
+                    if activeLane > maxActiveLane then maxActiveLane = activeLane end
+                end
+            end
+
+            -- For tracks whose active lane < maxActiveLane: copy active-lane items to maxActiveLane
+            if maxActiveLane > 0 then
+                for t, tr in ipairs(importedTracks) do
+                    local activeLane = trackActiveLanes[t] or 0
+                    if activeLane < maxActiveLane and validTrack(tr) then
+                        local cnt = r.CountTrackMediaItems(tr)
+                        local itemsToCopy = {}
+                        for idx = 0, cnt - 1 do
+                            local item = r.GetTrackMediaItem(tr, idx)
+                            local lane = r.GetMediaItemInfo_Value(item, "I_FIXEDLANE")
+                            if lane == activeLane then
+                                itemsToCopy[#itemsToCopy + 1] = item
+                            end
+                        end
+                        -- Duplicate items to maxActiveLane via chunk copy
+                        for _, item in ipairs(itemsToCopy) do
+                            local newItem = r.AddMediaItemToTrack(tr)
+                            local _, itemChunk = r.GetItemStateChunk(item, "", false)
+                            r.SetItemStateChunk(newItem, itemChunk, false)
+                            r.SetMediaItemInfo_Value(newItem, "I_FIXEDLANE", maxActiveLane)
+                        end
+                        -- Activate maxActiveLane on this track
+                        r.SetMediaTrackInfo_Value(tr, "C_LANEPLAYS:" .. activeLane, 0)
+                        r.SetMediaTrackInfo_Value(tr, "C_LANEPLAYS:" .. maxActiveLane, 1)
+                        log(string.format("  Track %d: copied %d items from lane %d to lane %d\n",
+                            t, #itemsToCopy, activeLane, maxActiveLane))
+                    end
+                end
+            end
+        end
+
         -- 4c: Consolidate all imported tracks onto the first one
         local masterTrack = importedTracks[1]
         for t = 2, #importedTracks do
@@ -2757,11 +2864,18 @@ local function commitMultiRpp()
             end
         end
 
-        -- 4d: Copy FX/Sends from template
+        -- 4d: Copy FX/Sends/Groups from template
         copyFX(mixTr, masterTrack)
         cloneSends(mixTr, masterTrack)
         copyTrackControls(mixTr, masterTrack)
         rewireReceives(mixTr, masterTrack)
+
+        -- Copy group flags from template (same approach as single-RPP)
+        if templateGroupFlags then
+            local _, masterChunk = r.GetTrackStateChunk(masterTrack, "", false)
+            masterChunk = replaceGroupFlagsInChunk(masterChunk, templateGroupFlags)
+            r.SetTrackStateChunk(masterTrack, masterChunk, false)
+        end
 
         -- Set name and color
         setTrName(masterTrack, mixName)
@@ -3669,14 +3783,15 @@ end
 
 -- ===== CHUNK SANITIZATION =====
 sanitizeChunk = function(chunk)
+    -- Patterns use %s* after \n to handle indented RPP chunks (2 spaces per nesting level)
     return (chunk
-        :gsub("\nI_FOLDERDEPTH%s+%-?%d+", "\nI_FOLDERDEPTH 0")
-        :gsub("\nAUXRECV.-\n", "\n")
-        :gsub("\nHWOUT.-\n", "\n")
-        :gsub("\nRECARM %d+", "\nRECARM 0")
-        :gsub("\nISBUS%s+%d+%s+%d+", "\nISBUS 0 0")
-        :gsub("\nSHOWINMIX %-?%d+", "\nSHOWINMIX 1")
-        :gsub("\nSHOWINTCP %-?%d+", "\nSHOWINTCP 1"))
+        :gsub("\n%s*I_FOLDERDEPTH%s+%-?%d+", "\nI_FOLDERDEPTH 0")
+        :gsub("\n%s*AUXRECV.-\n", "\n")
+        :gsub("\n%s*HWOUT.-\n", "\n")
+        :gsub("\n%s*RECARM %d+", "\nRECARM 0")
+        :gsub("\n%s*ISBUS%s+%d+%s+%d+", "\nISBUS 0 0")
+        :gsub("\n%s*SHOWINMIX %-?%d+", "\nSHOWINMIX 1")
+        :gsub("\n%s*SHOWINTCP %-?%d+", "\nSHOWINTCP 1"))
 end
 
 local function extractMediaPathsFromChunk(chunk)
@@ -4054,7 +4169,7 @@ local function copyTrackGroups(src, dst)
     log(string.format("  Copied groups: 0x%X\n", groupFlags))
 end
 
-local function replaceGroupFlagsInChunk(chunk, templateChunkGroupFlags)
+replaceGroupFlagsInChunk = function(chunk, templateChunkGroupFlags)
     log(string.format(">>> replaceGroupFlagsInChunk: templateChunkGroupFlags = '%s'\n", templateChunkGroupFlags or "NIL"))
     
     if not templateChunkGroupFlags or templateChunkGroupFlags == "" then
@@ -5992,6 +6107,10 @@ local function drawUI_body()
             local markChanged, markVal = r.ImGui_Checkbox(ctx, "Import Markers + Tempo Map", multiRppSettings.importMarkers)
             if markChanged then multiRppSettings.importMarkers = markVal end
 
+            r.ImGui_SameLine(ctx)
+            local laneChanged, laneVal = r.ImGui_Checkbox(ctx, "Align lanes", multiRppSettings.alignLanes)
+            if laneChanged then multiRppSettings.alignLanes = laneVal end
+
             -- Queue table
             local queueFlags = r.ImGui_TableFlags_Borders() | r.ImGui_TableFlags_RowBg()
             if r.ImGui_BeginTable(ctx, "rppqueue", 6, queueFlags) then
@@ -6189,10 +6308,43 @@ local function drawUI_body()
                 r.ImGui_Dummy(ctx, swh + 4, swh + 2)
             end
 
-            -- Template name column
+            -- Template name column (editable via double-click, same as single-RPP)
             r.ImGui_TableSetColumnIndex(ctx, 2)
             local displayName = trackName .. (isFolder and " (Folder)" or "")
-            r.ImGui_Text(ctx, displayName)
+            local editKey = "multi_" .. i
+
+            if editState.track == editKey then
+                -- Edit mode: inline InputText
+                r.ImGui_SetNextItemWidth(ctx, -1)
+                local changed, newBuf = r.ImGui_InputText(ctx, "##multiDestName_" .. i,
+                    editState.buf, r.ImGui_InputTextFlags_AutoSelectAll())
+                editState.buf = newBuf
+                if not r.ImGui_IsItemActive(ctx) and not r.ImGui_IsItemDeactivated(ctx) then
+                    r.ImGui_SetKeyboardFocusHere(ctx, -1)
+                end
+                if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then
+                    editState.track = nil
+                    editState.buf = ""
+                elseif r.ImGui_IsItemDeactivated(ctx) then
+                    local trimmed = (editState.buf or ""):gsub("^%s+", ""):gsub("%s+$", "")
+                    if trimmed ~= "" then
+                        r.GetSetMediaTrackInfo_String(tr, "P_NAME", trimmed, true)
+                        nameCache[tr] = trimmed
+                    end
+                    editState.track = nil
+                    editState.buf = ""
+                end
+            else
+                -- Display mode: Selectable with double-click to edit
+                r.ImGui_SetNextItemWidth(ctx, -1)
+                if r.ImGui_Selectable(ctx, displayName .. "##multiDest_" .. i, false,
+                        r.ImGui_SelectableFlags_AllowDoubleClick()) then
+                    if r.ImGui_IsMouseDoubleClicked(ctx, r.ImGui_MouseButton_Left()) then
+                        editState.track = editKey
+                        editState.buf = trackName
+                    end
+                end
+            end
 
             -- RPP columns (dropdown per RPP)
             for rppIdx, rpp in ipairs(rppQueue) do

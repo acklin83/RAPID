@@ -235,7 +235,8 @@ local settings = {
 
     -- UI settings
     swatch_size = 12,
-    enableConsoleLogging = false
+    enableConsoleLogging = false,
+    deleteUnused = false,  -- was standalone deleteUnusedMode (0/1), now boolean in settings
 }
 
 -- Mapping data (Import Mode)
@@ -250,7 +251,7 @@ local map = {}
 local normMap = {}  -- Maps trackIndex -> slotIndex -> {profile, targetPeak}
 local keepMap = {}  -- Maps trackIndex -> slotIndex -> boolean (keep source name)
 local fxMap = {}    -- Maps trackIndex -> slotIndex -> boolean (keep source FX)
-local deleteUnusedMode = 0
+-- deleteUnusedMode consolidated into settings.deleteUnused (boolean) to save local slot
 
 -- Normalize-Only Mode data
 local tracks = {}          -- Array of {track, name} for normalize-only mode
@@ -466,17 +467,18 @@ local function loadLastMapData()
     return t
 end
 
--- ===== FULL STATE SAVE/LOAD (for project reload) =====
 -- ===== IMPORT MARKERS/REGIONS/TEMPO (POST-COMMIT) =====
+-- Single-RPP: Import tempo, markers and regions from source RPP via API (no file-write or reload)
 local function importMarkersTempoPostCommit()
     if not recPath.rpp or recPath.rpp == "" then
         log("No recording RPP loaded, skipping marker import\n")
         return
     end
-    
+
     log("\n=== Importing Markers/Regions/Tempo ===\n")
-    
-    -- Read source RPP  
+    r.Undo_BeginBlock()
+
+    -- Read source RPP
     local f = io.open(recPath.rpp, "rb")
     if not f then
         log("Cannot read source RPP\n")
@@ -484,80 +486,62 @@ local function importMarkersTempoPostCommit()
     end
     local src_txt = f:read("*a"):gsub("^\239\187\191", ""):gsub("\r\n", "\n"):gsub("\r", "\n")
     f:close()
-    
-    -- Extract TEMPO to <PROJBAY> section
-    local tempo_start = src_txt:find("\n%s*TEMPO%s+") or src_txt:find("^%s*TEMPO%s+")
-    if not tempo_start then
-        log("No TEMPO line found in source\n")
-        return
+
+    -- 1. Extract & apply tempo
+    local tempoMap, baseTempo = extractTempoMap(src_txt)
+
+    -- Set base tempo
+    r.SetCurrentBPM(0, baseTempo.bpm, true)
+
+    -- Delete existing tempo markers
+    for i = r.CountTempoTimeSigMarkers(0) - 1, 0, -1 do
+        r.DeleteTempoTimeSigMarker(0, i)
     end
-    tempo_start = (src_txt:sub(tempo_start, tempo_start) == "\n") and (tempo_start + 1) or tempo_start
-    
-    local projbay_start = src_txt:find("\n%s*<PROJBAY", tempo_start) or src_txt:find("^%s*<PROJBAY", tempo_start)
-    if not projbay_start then
-        log("No <PROJBAY> found in source\n")
-        return
+
+    -- Set tempo markers via API (for correct positioning)
+    for _, pt in ipairs(tempoMap) do
+        r.SetTempoTimeSigMarker(0, -1, -1, -1, pt.pos,
+            pt.bpm, pt.num or 0, pt.denom or 0, pt.shape ~= 0)  -- shape 0 = square, 1+ = linear
     end
-    
-    local src_header = src_txt:sub(tempo_start, projbay_start - 1)
-    
-    -- Save current project
-    r.Main_SaveProject(0, false)
-    
-    -- Read current project
-    local _, cur_path = r.EnumProjects(-1, "")
-    if not cur_path or cur_path == "" then
-        log("Current project not saved\n")
-        return
+
+    -- Apply full-fidelity envelope chunk (preserves shape — API only supports linear/square)
+    if #tempoMap > 1 then
+        local envexStart = src_txt:find("<TEMPOENVEX\n")
+        if envexStart then
+            local envexEnd = src_txt:find("\n>", envexStart)
+            if envexEnd then
+                local envexChunk = src_txt:sub(envexStart, envexEnd + 1)
+                local masterTrack = r.GetMasterTrack(0)
+                local tempoEnv = masterTrack and r.GetTrackEnvelopeByName(masterTrack, "Tempo map")
+                if tempoEnv then
+                    local ok = r.SetEnvelopeStateChunk(tempoEnv, envexChunk, true)
+                    if ok then
+                        log("  Tempo envelope applied via chunk\n")
+                    else
+                        log("  WARNING: SetEnvelopeStateChunk failed, using API tempo only\n")
+                    end
+                end
+            end
+        end
     end
-    
-    f = io.open(cur_path, "rb")
-    if not f then
-        log("Cannot read current project\n")
-        return
+
+    -- 2. Import markers/regions via API
+    local markers = extractMarkersFromRpp(src_txt)
+    local markerCount, regionCount = 0, 0
+    for _, m in ipairs(markers) do
+        if m.isRegion then
+            r.AddProjectMarker2(0, true, m.pos, m.rgnend, m.name, -1, m.color)
+            regionCount = regionCount + 1
+        else
+            r.AddProjectMarker2(0, false, m.pos, 0, m.name, -1, m.color)
+            markerCount = markerCount + 1
+        end
     end
-    local cur_txt = f:read("*a"):gsub("^\239\187\191", ""):gsub("\r\n", "\n"):gsub("\r", "\n")
-    f:close()
-    
-    -- Find TEMPO/PROJBAY in current
-    local cur_tempo_start = cur_txt:find("\n%s*TEMPO%s+") or cur_txt:find("^%s*TEMPO%s+")
-    if not cur_tempo_start then
-        log("No TEMPO in current project\n")
-        return
-    end
-    cur_tempo_start = (cur_txt:sub(cur_tempo_start, cur_tempo_start) == "\n") and (cur_tempo_start + 1) or cur_tempo_start
-    
-    local cur_projbay_start = cur_txt:find("\n%s*<PROJBAY", cur_tempo_start) or cur_txt:find("^%s*<PROJBAY", cur_tempo_start)
-    if not cur_projbay_start then
-        log("No <PROJBAY> in current project\n")
-        return
-    end
-    
-    -- Build new project
-    local new_txt = cur_txt:sub(1, cur_tempo_start - 1) .. src_header .. cur_txt:sub(cur_projbay_start)
-    
-    -- Backup
-    local backup = cur_path .. ".backup_before_marker_import.rpp"
-    f = io.open(backup, "wb")
-    if f then f:write(cur_txt); f:close() end
-    
-    -- Write
-    f = io.open(cur_path, "wb")
-    if not f then
-        log("Cannot write modified project\n")
-        return
-    end
-    f:write(new_txt)
-    f:close()
-    
-    log("Markers/Regions/Tempo imported!\n")
-    log("Closing script - please restart manually after project reload.\n")
-    
-    -- Set flag to close script
-    uiFlags.close = true
-    
-    -- Reload project (script will close immediately after)
-    r.Main_openProject(cur_path)
+
+    r.UpdateTimeline()
+    r.Undo_EndBlock("RAPID: Import Markers/Tempomap", -1)
+    log(string.format("Markers/Regions/Tempo imported! (%d markers, %d regions, %d tempo points)\n",
+        markerCount, regionCount, #tempoMap))
 end
 
 -- ===== AUTO-RESUME NORMALIZATION AFTER RELOAD =====
@@ -832,7 +816,6 @@ local function loadIni()
     settings.autoMatchTracksOnImport = parseBool("AutoMatchTracksOnImport", true)
     settings.autoMatchProfilesOnImport = parseBool("AutoMatchProfilesOnImport", true)
     settings.deleteUnused = parseBool("DeleteUnused", false)
-    deleteUnusedMode = settings.deleteUnused and 1 or 0
 
     -- Parse [MultiRpp]
     local function parseMultiRppBool(key, default)
@@ -1782,18 +1765,7 @@ local function extractTempoMap(rppText)
     local points = {}
     local baseTempo = extractBaseTempo(rppText)
 
-    -- Add base tempo as first point (position 0)
-    points[#points + 1] = {
-        pos = 0,  -- Position in beats
-        bpm = baseTempo.bpm,
-        num = baseTempo.num,
-        denom = baseTempo.denom,
-        shape = 0,
-        tension = 0,
-        linear = false
-    }
-
-    -- Extract TEMPOENVEX points if present
+    -- Extract TEMPOENVEX points if present (authoritative source for shape + timesig)
     -- Note: Lua's .- does not match newlines, so we use find/sub for multi-line blocks
     local envexStart = rppText:find("<TEMPOENVEX\n")
     local envex = nil
@@ -1805,22 +1777,21 @@ local function extractTempoMap(rppText)
     end
     if envex then
         for line in envex:gmatch("PT%s+([^\n]+)") do
-            -- Format: PT <pos> <bpm> <shape> <tension> [<timesig>] [<flags>]
-            local pos, bpm, shape, tension, rest = line:match(
-                "([%d%.%-]+)%s+([%d%.]+)%s+(%d+)%s+([%d%.%-]+)%s*(.*)"
+            -- Real format: PT <pos> <bpm> <shape> [<timesig> <selected> <flags> ...]
+            -- Without timesig: PT <pos> <bpm> <shape>  (3 fields only)
+            local pos, bpm, shape, rest = line:match(
+                "([%d%.%-]+)%s+([%d%.]+)%s+(%d+)%s*(.*)"
             )
             if pos and bpm then
                 local pt = {
                     pos = tonumber(pos),
                     bpm = tonumber(bpm),
                     shape = tonumber(shape) or 0,
-                    tension = tonumber(tension) or 0,
                     num = nil,
                     denom = nil,
-                    linear = false
                 }
 
-                -- Parse optional time signature (encoded as 65536*denom + num)
+                -- Field 4 = optional timesig (encoded as 65536*denom + num)
                 if rest and rest ~= "" then
                     local timesig = rest:match("^(%d+)")
                     if timesig then
@@ -1835,6 +1806,18 @@ local function extractTempoMap(rppText)
                 points[#points + 1] = pt
             end
         end
+    end
+
+    -- Fallback: if no TEMPOENVEX or no point at pos 0, add baseTempo as first point
+    -- (TEMPOENVEX PT 0 is authoritative when present — has correct shape value)
+    if #points == 0 or points[1].pos > 0 then
+        table.insert(points, 1, {
+            pos = 0,
+            bpm = baseTempo.bpm,
+            num = baseTempo.num,
+            denom = baseTempo.denom,
+            shape = 0,
+        })
     end
 
     return points, baseTempo
@@ -2182,7 +2165,6 @@ local function buildMergedTempoSection()
                 pos = adjPos,
                 bpm = pt.bpm,
                 shape = pt.shape,
-                tension = pt.tension,
                 num = pt.num,
                 denom = pt.denom
             }
@@ -2202,15 +2184,15 @@ local function buildMergedTempoSection()
         lines[#lines + 1] = "DEFSHAPE 0 -1 -1"
 
         for _, pt in ipairs(allPoints) do
-            local ptLine = string.format("PT %.14g %.14g %d %.14g",
-                pt.pos, pt.bpm, pt.shape, pt.tension)
-
-            -- Add time signature if present
+            local ptLine
             if pt.num and pt.denom and pt.num > 0 and pt.denom > 0 then
                 local timesig = pt.denom * 65536 + pt.num
-                ptLine = ptLine .. " " .. timesig
+                ptLine = string.format("PT %.14g %.14g %d %d",
+                    pt.pos, pt.bpm, pt.shape, timesig)
+            else
+                ptLine = string.format("PT %.14g %.14g %d",
+                    pt.pos, pt.bpm, pt.shape)
             end
-
             lines[#lines + 1] = ptLine
         end
 
@@ -2220,7 +2202,102 @@ local function buildMergedTempoSection()
     return table.concat(lines, "\n")
 end
 
--- Write merged tempo/marker section to current project (similar to importMarkersTempoPostCommit)
+-- Apply full-fidelity tempo via SetEnvelopeStateChunk (no file I/O or reload needed)
+-- Builds TEMPOENVEX chunk from rppQueue data and applies it to the master tempo envelope
+local function applyTempoViaEnvelopeChunk()
+    if #rppQueue == 0 then return false end
+    log("\n=== Applying Full-Fidelity Tempo via Envelope Chunk ===\n")
+
+    -- Build envelope chunk from merged tempo data
+    local allPoints = {}
+    for _, rpp in ipairs(rppQueue) do
+        for _, pt in ipairs(rpp.tempoMap) do
+            allPoints[#allPoints + 1] = {
+                pos = pt.pos + rpp.qnOffset,
+                bpm = pt.bpm, shape = pt.shape,
+                num = pt.num, denom = pt.denom
+            }
+        end
+    end
+    table.sort(allPoints, function(a, b) return a.pos < b.pos end)
+    if #allPoints < 2 then
+        log("  No tempo changes to apply (single tempo throughout)\n")
+        return true  -- Not an error, just nothing to do
+    end
+
+    local lines = {}
+    lines[#lines + 1] = "<TEMPOENVEX"
+    lines[#lines + 1] = "ACT 1 -1"
+    lines[#lines + 1] = "VIS 1 0 1"
+    lines[#lines + 1] = "LANEHEIGHT 0 0"
+    lines[#lines + 1] = "ARM 0"
+    lines[#lines + 1] = "DEFSHAPE 0 -1 -1"
+    for _, pt in ipairs(allPoints) do
+        if pt.num and pt.denom and pt.num > 0 and pt.denom > 0 then
+            local ts = pt.denom * 65536 + pt.num
+            lines[#lines + 1] = string.format("PT %.14g %.14g %d %d",
+                pt.pos, pt.bpm, pt.shape, ts)
+        else
+            lines[#lines + 1] = string.format("PT %.14g %.14g %d",
+                pt.pos, pt.bpm, pt.shape)
+        end
+    end
+    lines[#lines + 1] = ">"
+    local chunk = table.concat(lines, "\n")
+
+    -- Delete all existing API tempo markers first to prevent duplicates
+    -- (REAPER's tempo envelope has a dual-source system: internal markers + envelope chunk.
+    --  If we don't clear the markers, SetEnvelopeStateChunk merges rather than replaces.)
+    local existingCount = r.CountTempoTimeSigMarkers(0)
+    log(string.format("  Deleting %d existing API tempo markers before chunk apply\n", existingCount))
+    for i = existingCount - 1, 0, -1 do
+        r.DeleteTempoTimeSigMarker(0, i)
+    end
+
+    -- Apply to master tempo envelope
+    local masterTrack = r.GetMasterTrack(0)
+    local tempoEnv = masterTrack and r.GetTrackEnvelopeByName(masterTrack, "Tempo map")
+    if not tempoEnv then
+        log("  ERROR: Cannot get tempo envelope\n")
+        return false
+    end
+
+    log("  Chunk to apply (" .. #allPoints .. " points):\n")
+    for cline in chunk:gmatch("[^\n]+") do
+        log("    " .. cline .. "\n")
+    end
+
+    local ok = r.SetEnvelopeStateChunk(tempoEnv, chunk, true)
+    if not ok then
+        log("  ERROR: SetEnvelopeStateChunk failed\n")
+        return false
+    end
+
+    r.UpdateTimeline()
+    r.UpdateArrange()
+
+    -- Verify: count resulting tempo markers
+    local resultCount = r.CountTempoTimeSigMarkers(0)
+    log(string.format("  Result: %d tempo markers after chunk apply (expected %d)\n",
+        resultCount, #allPoints))
+
+    -- Verify the chunk was actually applied
+    local _, readback = r.GetEnvelopeStateChunk(tempoEnv, "", false)
+    if readback then
+        local ptCount = 0
+        for _ in readback:gmatch("PT [^\n]+") do ptCount = ptCount + 1 end
+        log(string.format("  Readback: %d PT lines in envelope chunk\n", ptCount))
+        if ptCount ~= #allPoints then
+            log("  WARNING: PT count mismatch! Expected " .. #allPoints .. ", got " .. ptCount .. "\n")
+            log("  Readback:\n" .. readback .. "\n")
+        end
+    end
+
+    log("  Tempo envelope applied successfully\n")
+    return true
+end
+
+-- Write merged tempo/marker section to current project (FALLBACK — only used if SetEnvelopeStateChunk fails)
 local function writeMultiRppTempoSection()
     if #rppQueue == 0 then
         log("No RPPs in queue, skipping tempo merge\n")
@@ -2424,7 +2501,7 @@ local function setTempoViaAPI()
                 bpm = pt.bpm,
                 num = pt.num or 0,
                 denom = pt.denom or 0,
-                linear = pt.shape == 0
+                linear = pt.shape ~= 0  -- shape 0 = square (linear=false), shape 1+ = linear ramp (linear=true)
             }
         end
     end
@@ -2899,7 +2976,7 @@ local function commitMultiRpp()
     end
 
     -- STEP 5: Delete unused template tracks (if enabled)
-    if deleteUnusedMode == 1 then
+    if settings.deleteUnused then
         r.Main_OnCommand(40297, 0)  -- Unselect all tracks
 
         for _, tr in ipairs(mixTargets) do
@@ -2973,16 +3050,19 @@ local function commitMultiRpp()
     r.PreventUIRefresh(-1)
     r.TrackList_AdjustWindows(false)
 
-    -- STEP 9: Save project, overwrite tempo section with full-fidelity plaintext, reload
-    -- Only needed when tempo/markers were imported (importMarkers enabled)
+    -- STEP 9: Apply full-fidelity tempo via envelope chunk (no reload needed)
     if multiRppSettings.importMarkers then
-        writeMultiRppTempoSection()
-        local _, cur_path = r.EnumProjects(-1, "")
-        if cur_path and cur_path ~= "" then
-            log("\n=== Reloading project for full-fidelity tempo ===\n")
-            r.Undo_EndBlock("RAPID v" .. VERSION .. ": Multi-RPP Import", -1)
-            r.Main_openProject(cur_path)
-            return  -- Script closes due to reload
+        local tempoOk = applyTempoViaEnvelopeChunk()
+        if not tempoOk then
+            -- Fallback: file-write + reload (old approach)
+            log("  Falling back to file-write tempo approach\n")
+            writeMultiRppTempoSection()
+            local _, cur_path = r.EnumProjects(-1, "")
+            if cur_path and cur_path ~= "" then
+                r.Undo_EndBlock("RAPID v" .. VERSION .. ": Multi-RPP Import", -1)
+                r.Main_openProject(cur_path)
+                return
+            end
         end
     end
 
@@ -5544,7 +5624,7 @@ local function commitMappings()
     end
 
     -- Delete unused tracks
-    if deleteUnusedMode == 1 then
+    if settings.deleteUnused then
         local sel = {}
         for i = 0, r.CountTracks(0) - 1 do
             local t = r.GetTrack(0, i)
@@ -5859,16 +5939,19 @@ local function commitMappings()
     r.PreventUIRefresh(-1)
     r.TrackList_AdjustWindows(false)
 
-    -- Multi-RPP: Write merged tempo/marker section
+    -- Multi-RPP: Apply full-fidelity tempo via envelope chunk
     if multiRppSettings.enabled and #rppQueue > 1 then
-        writeMultiRppTempoSection()
-        -- Reload project to apply tempo changes
-        local _, cur_path = r.EnumProjects(-1, "")
-        if cur_path and cur_path ~= "" then
-            log("\n=== Reloading project to apply Multi-RPP tempo ===\n")
-            r.Undo_EndBlock("RAPID v" .. VERSION .. ": Commit (Multi-RPP)", -1)
-            r.Main_openProject(cur_path)
-            return  -- Script will close due to project reload
+        local tempoOk = applyTempoViaEnvelopeChunk()
+        if not tempoOk then
+            -- Fallback: file-write + reload
+            log("  Falling back to file-write tempo approach\n")
+            writeMultiRppTempoSection()
+            local _, cur_path = r.EnumProjects(-1, "")
+            if cur_path and cur_path ~= "" then
+                r.Undo_EndBlock("RAPID v" .. VERSION .. ": Commit (Multi-RPP)", -1)
+                r.Main_openProject(cur_path)
+                return
+            end
         end
     end
 
@@ -6273,7 +6356,7 @@ local function drawUI_body()
             local isFolder = not isLeafCached(tr)
 
             -- Delete unused: hide unmapped unlocked tracks
-            if deleteUnusedMode == 1 then
+            if settings.deleteUnused then
                 local hasAnyMapping = false
                 if multiMap[i] then
                     for _, v in pairs(multiMap[i]) do
@@ -6629,7 +6712,7 @@ local function drawUI_body()
         
         -- Pre-compute which folders have at least one child with a source or locked child
         local folderHasContent = {}
-        if deleteUnusedMode == 1 and #recSources > 0 then
+        if settings.deleteUnused and #recSources > 0 then
             -- Walk backwards: if a track has source/is locked, mark all parent folders
             local parentStack = {}  -- stack of folder indices
             for i, tr in ipairs(mixTargets) do
@@ -6675,7 +6758,7 @@ local function drawUI_body()
             local isLocked = protectedSet[trackName] and true or false
             local isFolder = not isLeafCached(tr)
             local hideRow
-            if deleteUnusedMode == 1 and #recSources > 0 then
+            if settings.deleteUnused and #recSources > 0 then
                 if isFolder then
                     hideRow = not isLocked and not folderHasContent[i]
                 else
@@ -7135,10 +7218,9 @@ local function drawUI_body()
     r.ImGui_Separator(ctx)
 
     -- Options row 1: Delete unused + Copy media
-    local delChanged, delVal = r.ImGui_Checkbox(ctx, "Delete unused", deleteUnusedMode == 1)
+    local delChanged, delVal = r.ImGui_Checkbox(ctx, "Delete unused", settings.deleteUnused)
     if delChanged then
-        deleteUnusedMode = delVal and 1 or 0
-        settings.deleteUnused = (deleteUnusedMode == 1)
+        settings.deleteUnused = delVal
         saveIni()
     end
     r.ImGui_SameLine(ctx)

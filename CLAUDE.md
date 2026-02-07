@@ -108,10 +108,11 @@
 - Chunk-based FX copying was tried and reverted (v1.4) — use native API (`TrackFX_CopyToTrack`)
 - Performance-critical: track operations were optimized from 20s → 2s (v1.5 refactor)
 - Import pipeline (`commitMappings()`) optimized in v2.3.1: cached chunk serialization, removed redundant `UpdateArrange()` calls, targeted peak building and media sweep to new tracks only, pre-computed normalization lookup
-- Multi-RPP import (`commitMultiRpp()`) uses a different pipeline: API tempo → import all tracks → shift/consolidate → plaintext tempo overwrite → reload
-- Tempo import via API loses Shape/Tension — used only for positioning; plaintext overwrite at end restores full fidelity
+- Multi-RPP import (`commitMultiRpp()`) uses a different pipeline: API tempo → import all tracks → shift/consolidate → envelope chunk apply (no reload)
+- Tempo import via API (`SetTempoTimeSigMarker`) loses Shape/Tension — used only for positioning; `SetEnvelopeStateChunk` on master tempo envelope restores full fidelity without file I/O or reload
+- Both single-RPP and multi-RPP marker/tempo import use API-based approach (no project reload needed) — undo works correctly for both
 - All multi-RPP calculations are measure-based, not time-based (time is unreliable with changing tempos)
-- **Lua 200 local variable limit:** Main chunk is at ~195 locals. Adding new top-level `local` variables is dangerous — consolidate into existing tables or use forward declarations (which move, not add, locals). For-loop control variables consume 3 internal slots.
+- **Lua 200 local variable limit:** Main chunk is at ~194 locals. Adding new top-level `local` variables is dangerous — consolidate into existing tables or use forward declarations (which move, not add, locals). For-loop control variables consume 3 internal slots.
 - **Forward declarations:** 9 functions (`sanitizeChunk`, `fixChunkMediaPaths`, `postprocessTrackCopyRelink`, `copyFX`, `cloneSends`, `rewireReceives`, `copyTrackControls`, `shiftTrackItemsBy`, `replaceGroupFlagsInChunk`) are forward-declared before `commitMultiRpp` because they're defined later in the file. Their definitions use `X = function(...)` assignment form (not `local function`).
 
 ## Normalization System (v2.4+)
@@ -129,11 +130,11 @@
 
 Import multiple RPP recording session files into the same mix template. Each RPP gets its own region, with tempo/time-signature changes merged correctly. All calculations are measure-based (not time-based) because time doesn't work reliably with changing tempos.
 
-### Architecture: Single-Pass with Two-Phase Tempo
+### Architecture: Single-Pass with Two-Phase Tempo + Envelope Chunk
 
 1. **API tempo first** — `setTempoViaAPI()` uses `SetTempoTimeSigMarker` to write tempo markers so REAPER can calculate correct positions for track import
 2. **Import tracks** — for each template track, import all mapped RPP tracks, shift items + envelopes to correct measure offsets, consolidate onto one master track
-3. **Plaintext tempo overwrite** — `writeMultiRppTempoSection()` replaces the entire tempo section in the saved .rpp file with full-fidelity plaintext (API loses Shape/Tension parameters), then reloads
+3. **Envelope chunk apply** — `applyTempoViaEnvelopeChunk()` uses `SetEnvelopeStateChunk` on the master tempo envelope to apply full-fidelity tempo data (Shape/Tension preserved) without file I/O or project reload. Fallback: `writeMultiRppTempoSection()` (file-write + reload)
 
 ### RPP Queue
 
@@ -148,7 +149,8 @@ Import multiple RPP recording session files into the same mix template. Each RPP
 - `extractTempoMap(rppText)` — parses `TEMPO` line + `<TEMPOENVEX>` `PT` points; time signature encoded as `65536 * denom + num`
 - `extractMarkersFromRpp(rppText)` — parses MARKER lines from .rpp; pairs region start+end markers (same idx) into single entries with `rgnend`
 - `buildMergedTempoSection()` — builds plaintext section (TEMPO line + TEMPOENVEX with all PT points from all RPPs, offset by `qnOffset`). Does NOT write MARKER lines — those are created via API and preserved from the saved .rpp
-- `writeMultiRppTempoSection()` — saves project, reads .rpp file, replaces TEMPO+TEMPOENVEX section while preserving existing MARKER lines (between TEMPOENVEX end and `<PROJBAY>`), writes back, reloads
+- `applyTempoViaEnvelopeChunk()` — builds TEMPOENVEX chunk from rppQueue data and applies it via `SetEnvelopeStateChunk` on master tempo envelope; no file I/O or reload needed. Returns true/false for fallback logic
+- `writeMultiRppTempoSection()` — FALLBACK: saves project, reads .rpp file, replaces TEMPO+TEMPOENVEX section while preserving existing MARKER lines, writes back, reloads. Only used if `SetEnvelopeStateChunk` fails
 - Gap between RPPs inherits the last tempo from the preceding RPP
 
 ### Beat Offset Calculation (qnOffset)
@@ -179,7 +181,7 @@ After `setTempoViaAPI()` runs, REAPER's `TimeMap2_beatsToTime(0, qnOffset)` give
 5. Delete unused template tracks (if enabled)
 6. Normalize per region (uses auto-created RPP regions)
 7. Build peaks, minimize tracks
-8. writeMultiRppTempoSection() + reload (ONLY if importMarkers enabled)
+8. applyTempoViaEnvelopeChunk() — full-fidelity tempo via SetEnvelopeStateChunk (fallback: writeMultiRppTempoSection + reload)
 ```
 
 ### Key Helper Functions
@@ -217,7 +219,37 @@ After `setTempoViaAPI()` runs, REAPER's `TimeMap2_beatsToTime(0, qnOffset)` give
 
 4. **Diagnostic logging added**: gsub replacement counts for POSITION and PT values are now logged to help verify shifting works correctly.
 
+## FIXED BUG: Multi-RPP Item Positioning + Region Length (v2.5)
+
+**Status:** Fixed — needs manual testing in REAPER to confirm.
+
+### Root Causes Found
+
+1. **`extractTempoMap()` line 1794**: `rppText:match("<TEMPOENVEX.-\n>")` used Lua's `.-` which cannot match newlines. Multi-line TEMPOENVEX blocks were never extracted, so only base tempo was returned. This caused `calculateRppLengthInMeasures()` to use the fallback constant-BPM formula, producing wrong lengths for RPPs with tempo changes. **Fixed** by replacing with `find/sub` extraction.
+
+2. **`sanitizeChunk()` lines 3679-3688**: Patterns like `\nAUXRECV.-\n` didn't match indented RPP lines (e.g., `\n    AUXRECV ...`). Stale AUXRECV/HWOUT entries referencing non-existent tracks could cause `SetTrackStateChunk` to silently fail. **Fixed** by adding `%s*` after `\n` in all patterns.
+
+3. **`commitMultiRpp()` line 2745**: `SetTrackStateChunk` return value was not checked, hiding failures. **Fixed** with return value check and warning log.
+
+4. **Diagnostic logging added**: gsub replacement counts for POSITION and PT values are now logged to help verify shifting works correctly.
+
 ## Resolved Issues
+
+**Fixed (v2.5): extractTempoMap() duplicate points at position 0**
+
+- Root cause: `extractTempoMap()` always inserted a baseTempo point at pos=0 (from TEMPO line, with hardcoded shape=0 and timesig) AND then parsed all PT lines from TEMPOENVEX (including PT 0 with correct shape). This created duplicate points at position 0 for every RPP, with conflicting shape values and unnecessary timesig.
+- In multi-RPP context, each RPP contributed 2 points at its offset position instead of 1, resulting in 8 points instead of 6 (for 2 RPPs), with phantom tempo changes and wrong item positions.
+- Fix: baseTempo point is now only inserted as fallback when no TEMPOENVEX exists or when TEMPOENVEX has no point at pos 0. TEMPOENVEX PT lines are the authoritative source for shape values.
+
+**Fixed (v2.5): PT line format bug in extractTempoMap() + project reload eliminated**
+
+- Root cause: `extractTempoMap()` parsed TEMPOENVEX PT field 4 as "tension" but it is actually "timesig" (e.g., 262148 = 4/4). This caused time signature changes within an RPP to be lost, and `buildMergedTempoSection()` always wrote 4 fields (including spurious `0` tension) instead of 3 fields for points without time signature
+- Fix: Removed tension from data model, field 4 now correctly parsed as optional timesig. PT lines output as 3 fields (pos/bpm/shape) or 4 fields (pos/bpm/shape/timesig)
+- Project reload eliminated: `SetEnvelopeStateChunk` on master tempo envelope replaces the save+edit+reload cycle for both single-RPP (`importMarkersTempoPostCommit()`) and multi-RPP (`applyTempoViaEnvelopeChunk()`)
+- Undo now works correctly for marker/tempo import (entire operation in single Undo block)
+- Multi-RPP retains `writeMultiRppTempoSection()` as fallback if `SetEnvelopeStateChunk` fails
+- Bug fix: `setTempoViaAPI()` and `importMarkersTempoPostCommit()` had inverted `lineartempo` mapping — `pt.shape == 0` (square) was mapped to `linear=true` (gradual ramp). Fixed to `pt.shape ~= 0`. Previously masked by plaintext overwrite+reload, exposed when switching to `SetEnvelopeStateChunk`.
+- Bug fix: "Recalculation kick" (`SetTempoTimeSigMarker` re-set on marker 0) after `SetEnvelopeStateChunk` caused REAPER to rebuild envelope from internal markers, overriding the chunk. Removed; using `UpdateTimeline()` + `UpdateArrange()` instead.
 
 **Fixed (v2.5): Multi-RPP marker/region duplication and wrong positions**
 

@@ -59,7 +59,7 @@
 - `calibrationWindow` — state for LUFS calibration popup (v2.4+)
 - `normProfiles` — array of profiles with optional per-profile LUFS settings (segmentSize, percentile, threshold)
 - `multiRppSettings` — `{enabled=false, gapInMeasures=2, createRegions=true, importMarkers=true, alignLanes=true}`
-- `rppQueue` — array of RPP entries: `{path, name, rppText, tracks[], baseTempo, tempoMap[], markers[], lengthInMeasures, measureOffset, qnOffset}`
+- `rppQueue` — array of RPP entries: `{path, name, rppText, tracks[], baseTempo, tempoMap[], markers[], lengthInMeasures, lengthInQN, maxEndTime, measureOffset, qnOffset, timeOffset}`
 - `multiMap` — mapping: `multiMap[mixIdx][rppIdx] = trackIdxInRpp` (0 = unmapped)
 - `multiNormMap` — normalization per template track: `multiNormMap[mixIdx] = {profile, targetPeak}`
 - `trackCache` — weak caches: `.kids` (folder has children), `.color` (effective track color)
@@ -108,10 +108,10 @@
 - Chunk-based FX copying was tried and reverted (v1.4) — use native API (`TrackFX_CopyToTrack`)
 - Performance-critical: track operations were optimized from 20s → 2s (v1.5 refactor)
 - Import pipeline (`commitMappings()`) optimized in v2.3.1: cached chunk serialization, removed redundant `UpdateArrange()` calls, targeted peak building and media sweep to new tracks only, pre-computed normalization lookup
-- Multi-RPP import (`commitMultiRpp()`) uses a different pipeline: API tempo → import all tracks → shift/consolidate → envelope chunk apply (no reload)
-- Tempo import via API (`SetTempoTimeSigMarker`) loses Shape/Tension — used only for positioning; `SetEnvelopeStateChunk` on master tempo envelope restores full fidelity without file I/O or reload
+- Multi-RPP import (`commitMultiRpp()`) uses a different pipeline: API tempo → import tracks → shift/consolidate → delete unused → regions/markers → normalize (no reload)
+- Tempo import via API (`SetTempoTimeSigMarker`) now has full fidelity — shape 0/1 maps perfectly to linear true/false. `SetEnvelopeStateChunk` is still used for single-RPP (copies source TEMPOENVEX directly) but NOT for multi-RPP (API markers are sufficient, envelope chunk corrupted internal state)
 - Both single-RPP and multi-RPP marker/tempo import use API-based approach (no project reload needed) — undo works correctly for both
-- All multi-RPP calculations are measure-based, not time-based (time is unreliable with changing tempos)
+- **TEMPOENVEX PT positions are in SECONDS** (not quarter notes). Shape values: **shape=0 = gradual/linear ramp**, **shape=1 = square/instant**. This is the opposite of what the `linear` parameter in `SetTempoTimeSigMarker` suggests (`linear=true` corresponds to shape=0).
 - **Lua 200 local variable limit:** Main chunk is at ~194 locals. Adding new top-level `local` variables is dangerous — consolidate into existing tables or use forward declarations (which move, not add, locals). For-loop control variables consume 3 internal slots.
 - **Forward declarations:** 9 functions (`sanitizeChunk`, `fixChunkMediaPaths`, `postprocessTrackCopyRelink`, `copyFX`, `cloneSends`, `rewireReceives`, `copyTrackControls`, `shiftTrackItemsBy`, `replaceGroupFlagsInChunk`) are forward-declared before `commitMultiRpp` because they're defined later in the file. Their definitions use `X = function(...)` assignment form (not `local function`).
 
@@ -128,18 +128,18 @@
 
 ### Concept
 
-Import multiple RPP recording session files into the same mix template. Each RPP gets its own region, with tempo/time-signature changes merged correctly. All calculations are measure-based (not time-based) because time doesn't work reliably with changing tempos.
+Import multiple RPP recording session files into the same mix template. Each RPP gets its own region, with tempo/time-signature changes merged correctly. Item/region/marker positioning uses time-based offsets (seconds). Tempo envelope PT positions are in seconds.
 
-### Architecture: Single-Pass with Two-Phase Tempo + Envelope Chunk
+### Architecture: Single-Pass with API Tempo
 
-1. **API tempo first** — `setTempoViaAPI()` uses `SetTempoTimeSigMarker` to write tempo markers so REAPER can calculate correct positions for track import
-2. **Import tracks** — for each template track, import all mapped RPP tracks, shift items + envelopes to correct measure offsets, consolidate onto one master track
-3. **Envelope chunk apply** — `applyTempoViaEnvelopeChunk()` uses `SetEnvelopeStateChunk` on the master tempo envelope to apply full-fidelity tempo data (Shape/Tension preserved) without file I/O or project reload. Fallback: `writeMultiRppTempoSection()` (file-write + reload)
+1. **API tempo** — `setTempoViaAPI()` uses `SetTempoTimeSigMarker` to write tempo markers with full shape fidelity (shape 0/1 maps perfectly to `linear` true/false). Tempo map is 100% final before any items enter the project.
+2. **Import tracks** — for each template track, import all mapped RPP tracks, shift items + envelopes to correct time offsets, consolidate onto one master track
+3. **Regions/markers** — created after track import, against the final tempo map
 
 ### RPP Queue
 
-- `rppQueue[]` entries contain: path, name, rppText, tracks[], baseTempo (bpm/num/denom), tempoMap[] (all tempo points), markers[], lengthInMeasures, measureOffset, qnOffset
-- `recalculateQueueOffsets()` computes both `measureOffset` (for UI) and `qnOffset` (QN position for all beat/time calculations, accumulated correctly across RPPs with different time signatures)
+- `rppQueue[]` entries contain: path, name, rppText, tracks[], baseTempo (bpm/num/denom), tempoMap[] (all tempo points with `pt.pos` and `pt.time` in seconds), markers[], lengthInMeasures, lengthInQN, maxEndTime (seconds), measureOffset, qnOffset (for fallback buildMergedTempoSection only), timeOffset (seconds, primary for all positioning)
+- `recalculateQueueOffsets()` computes `measureOffset` (for UI, using `rpp.lengthInMeasures`), `timeOffset` (seconds, for all item/region/marker/tempo positioning), and `qnOffset` (beats, for fallback `buildMergedTempoSection()` only). Time is accumulated from `maxEndTime` rounded up to measure boundary.
 - Drag-and-drop reordering via ImGui `DragDropSource`/`DragDropTarget`
 - JS_ReaScriptAPI multi-file dialog for loading multiple RPPs at once
 
@@ -148,40 +148,51 @@ Import multiple RPP recording session files into the same mix template. Each RPP
 - `extractBaseTempo(rppText)` — parses `TEMPO <bpm> <num> <denom>` line
 - `extractTempoMap(rppText)` — parses `TEMPO` line + `<TEMPOENVEX>` `PT` points; time signature encoded as `65536 * denom + num`
 - `extractMarkersFromRpp(rppText)` — parses MARKER lines from .rpp; pairs region start+end markers (same idx) into single entries with `rgnend`
-- `buildMergedTempoSection()` — builds plaintext section (TEMPO line + TEMPOENVEX with all PT points from all RPPs, offset by `qnOffset`). Does NOT write MARKER lines — those are created via API and preserved from the saved .rpp
-- `applyTempoViaEnvelopeChunk()` — builds TEMPOENVEX chunk from rppQueue data and applies it via `SetEnvelopeStateChunk` on master tempo envelope; no file I/O or reload needed. Returns true/false for fallback logic
-- `writeMultiRppTempoSection()` — FALLBACK: saves project, reads .rpp file, replaces TEMPO+TEMPOENVEX section while preserving existing MARKER lines, writes back, reloads. Only used if `SetEnvelopeStateChunk` fails
+- `buildMergedTempoSection()` — FALLBACK: builds plaintext section (TEMPO line + TEMPOENVEX with all PT points offset by `timeOffset`). Only used if file-write fallback is triggered
+- `applyTempoViaEnvelopeChunk()` — retained as code but NOT called in multi-RPP pipeline. Was previously used to apply tempo via `SetEnvelopeStateChunk`, but corrupted REAPER's internal beat positions. API markers now have full shape fidelity, making it unnecessary.
+- `writeMultiRppTempoSection()` — FALLBACK: saves project, reads .rpp file, replaces TEMPO+TEMPOENVEX section while preserving existing MARKER lines, writes back, reloads. Only used if API tempo fails
 - Gap between RPPs inherits the last tempo from the preceding RPP
 
-### Beat Offset Calculation (qnOffset)
+### Time-Based Offset System
 
-**Critical:** Converting measure offsets to beat positions (quarter notes) requires accounting for time signatures. A measure in 6/8 has 3 QN (`6 * 4/8`), not 6. And each RPP may have a different time signature, so the global offset must accumulate QN from all preceding RPPs.
+**Architecture:** Everything uses seconds. TEMPOENVEX PT positions are in seconds (not QN). Item/region/marker positioning uses `timeOffset` (seconds) directly. Tempo envelope PT positions are written as seconds directly (that's what REAPER expects).
 
-Formula per measure: `qnPerMeasure = num * (4 / denom)`
+**Per RPP at load:** `maxEndTime` = max(POSITION+LENGTH) in seconds. Each tempo map point's `pt.pos` IS already in seconds (from TEMPOENVEX PT). `pt.time = pt.pos` (simple assignment).
 
-`recalculateQueueOffsets()` computes both `measureOffset` (for UI display) and `qnOffset` (for all beat/time calculations). All code that converts measure positions to beats MUST use `rpp.qnOffset`, never `rpp.measureOffset * (rpp.baseTempo.num or 4)`.
+**`recalculateQueueOffsets()`** computes for each RPP:
+- `timeOffset` = accumulated seconds (primary, for all positioning including tempo envelope)
+- `measureOffset` = accumulated measures (for UI display, uses `rpp.lengthInMeasures`)
+- `qnOffset` = accumulated beats (for fallback `buildMergedTempoSection()` only)
+- Duration is rounded up to next measure boundary at base tempo before adding gap
 
-After `setTempoViaAPI()` runs, REAPER's `TimeMap2_beatsToTime(0, qnOffset)` gives accurate time positions.
+**`setTempoViaAPI()`** sets markers using `rpp.timeOffset + pt.time` (time positions). Shape mapping: `linear = pt.shape == 0` (shape 0 = gradual = linear=true, shape 1 = square = linear=false).
+
+**`applyTempoViaEnvelopeChunk()`** is retained as code but NOT called in the multi-RPP pipeline. It was previously used to apply tempo via `SetEnvelopeStateChunk`, but deleting API markers before chunk apply corrupted REAPER's internal beat positions (TIMELOCKMODE 2 issue). Since `setTempoViaAPI()` now maps shapes correctly, the envelope chunk is unnecessary.
+
+**Shape values in TEMPOENVEX:**
+- `shape=0` → gradual/linear ramp → API `linear=true`
+- `shape=1` → square/instant → API `linear=false`
 
 ### Track Consolidation Pipeline (`commitMultiRpp()`)
 
 ```
-1. setTempoViaAPI() — set tempo markers for correct positioning (uses beatpos parameter)
-2. createMultiRppRegions() — one region per RPP (gated on createRegions setting)
-3. importMultiRppMarkers() — markers with measure offsets (gated on importMarkers setting)
-4. For each template track with mappings:
-   a. For each RPP: sanitize chunk, fix media paths
-   b. Shift POSITION + PT values in chunk text (gsub before SetTrackStateChunk)
-   c. Append POOLEDENV (after shifting — pooled envs use beat-based positions)
-   d. SetTrackStateChunk (with return value check) + postprocessTrackCopyRelink
-   e. Consolidate: move items + copy envelope points to first track
-   e2. Align lanes: move all items to highest lane for visibility (gated on alignLanes setting)
-   f. Copy FX/Sends/Groups from template track (includes GROUP_FLAGS via replaceGroupFlagsInChunk)
-   g. Delete extra tracks + original template track
-5. Delete unused template tracks (if enabled)
-6. Normalize per region (uses auto-created RPP regions)
-7. Build peaks, minimize tracks
-8. applyTempoViaEnvelopeChunk() — full-fidelity tempo via SetEnvelopeStateChunk (fallback: writeMultiRppTempoSection + reload)
+1.  setTempoViaAPI() — set tempo markers using time positions (rpp.timeOffset + pt.time)
+    Tempo map is now 100% final (API has full shape fidelity: shape 0/1 → linear true/false).
+    applyTempoViaEnvelopeChunk() is NOT called — it corrupted REAPER's internal beat positions
+    by deleting API markers before SetEnvelopeStateChunk (TIMELOCKMODE 2 issue).
+2.  For each template track with mappings:
+    a. For each RPP: sanitize chunk, fix media paths
+    b. Shift POSITION + PT values in chunk text by rpp.timeOffset seconds (gsub before SetTrackStateChunk)
+    c. Append POOLEDENV (after shifting — pooled envs use beat-based positions)
+    d. SetTrackStateChunk (with return value check) + postprocessTrackCopyRelink
+    e. Consolidate: move items + copy envelope points to first track
+    e2. Align lanes: move all items to highest lane for visibility (gated on alignLanes setting)
+    f. Copy FX/Sends/Groups from template track (includes GROUP_FLAGS via replaceGroupFlagsInChunk)
+    g. Delete extra tracks + original template track
+3. Delete unused template tracks (if enabled)
+4. createMultiRppRegions() + importMultiRppMarkers() — regions/markers placed against final tempo map
+5. Normalize per region (uses auto-created RPP regions)
+6. Build peaks, minimize tracks
 ```
 
 ### Key Helper Functions
@@ -205,35 +216,30 @@ After `setTempoViaAPI()` runs, REAPER's `TimeMap2_beatsToTime(0, qnOffset)` give
 - Send Envelopes and Pooled Automation items are not explicitly shifted (deferred to future version)
 - Pooled automation is copied as-is (works because it's pooled by reference)
 
-## FIXED BUG: Multi-RPP Item Positioning + Region Length (v2.5)
-
-**Status:** Fixed — needs manual testing in REAPER to confirm.
-
-### Root Causes Found
-
-1. **`extractTempoMap()` line 1794**: `rppText:match("<TEMPOENVEX.-\n>")` used Lua's `.-` which cannot match newlines. Multi-line TEMPOENVEX blocks were never extracted, so only base tempo was returned. This caused `calculateRppLengthInMeasures()` to use the fallback constant-BPM formula, producing wrong lengths for RPPs with tempo changes. **Fixed** by replacing with `find/sub` extraction.
-
-2. **`sanitizeChunk()` lines 3679-3688**: Patterns like `\nAUXRECV.-\n` didn't match indented RPP lines (e.g., `\n    AUXRECV ...`). Stale AUXRECV/HWOUT entries referencing non-existent tracks could cause `SetTrackStateChunk` to silently fail. **Fixed** by adding `%s*` after `\n` in all patterns.
-
-3. **`commitMultiRpp()` line 2745**: `SetTrackStateChunk` return value was not checked, hiding failures. **Fixed** with return value check and warning log.
-
-4. **Diagnostic logging added**: gsub replacement counts for POSITION and PT values are now logged to help verify shifting works correctly.
-
-## FIXED BUG: Multi-RPP Item Positioning + Region Length (v2.5)
-
-**Status:** Fixed — needs manual testing in REAPER to confirm.
-
-### Root Causes Found
-
-1. **`extractTempoMap()` line 1794**: `rppText:match("<TEMPOENVEX.-\n>")` used Lua's `.-` which cannot match newlines. Multi-line TEMPOENVEX blocks were never extracted, so only base tempo was returned. This caused `calculateRppLengthInMeasures()` to use the fallback constant-BPM formula, producing wrong lengths for RPPs with tempo changes. **Fixed** by replacing with `find/sub` extraction.
-
-2. **`sanitizeChunk()` lines 3679-3688**: Patterns like `\nAUXRECV.-\n` didn't match indented RPP lines (e.g., `\n    AUXRECV ...`). Stale AUXRECV/HWOUT entries referencing non-existent tracks could cause `SetTrackStateChunk` to silently fail. **Fixed** by adding `%s*` after `\n` in all patterns.
-
-3. **`commitMultiRpp()` line 2745**: `SetTrackStateChunk` return value was not checked, hiding failures. **Fixed** with return value check and warning log.
-
-4. **Diagnostic logging added**: gsub replacement counts for POSITION and PT values are now logged to help verify shifting works correctly.
-
 ## Resolved Issues
+
+**Fixed (v2.5): Multi-RPP offset system refactored from beat-based to time-based**
+
+- Root cause: Beat-based offset system (`qnOffset` + `TimeMap2_beatsToTime`) had circular dependency — needed tempo map to convert beats→time, but was building the tempo map. API tempo markers disappeared during track import operations, causing `TimeMap2_beatsToTime` to return wrong values. Items shifted by 4355s instead of ~4643s (288s error).
+- Fix: Complete refactor to time-based offsets. `maxEndTime` (seconds) computed from RPP items' POSITION+LENGTH. `timeOffset` accumulated in seconds (rounded up to measure boundary at base tempo + gap). Item/region/marker positioning uses `timeOffset` directly — no `TimeMap2_beatsToTime` calls. Tempo markers set via API using time positions (`SetTempoTimeSigMarker` with `timepos` parameter) with correct shape mapping (`linear = pt.shape == 0`). `qnOffset` retained only for fallback `buildMergedTempoSection()` path.
+
+**Fixed (v2.5): Multi-RPP measures→QN lossy conversion + shape-ignoring time calculation**
+
+- Root cause 1 (major): `recalculateQueueOffsets()` and `createMultiRppRegions()` converted `lengthInMeasures` back to QN via `lengthInMeasures * baseTempo.qnPerMeasure`, which assumes all measures have the base time signature. RPPs with internal time sig changes (e.g., 4/4 → 7/4) had wildly wrong QN offsets — e.g., Mels: 2257 measures * 4 QN = 9028 QN instead of correct ~13485 QN (4457 QN / ~1486s error at 180 BPM).
+- Root cause 2 (minor): `calculateRppLengthInMeasures()` time calculation used constant-BPM formula for all segments, ignoring Shape 1 (linear ramp). Correct formula for linear ramp: `deltaTime = deltaQN * 60 * ln(bpm2/bpm1) / (bpm2 - bpm1)`. ~29s / ~72 QN error.
+- Fix: `calculateRppLengthInMeasures()` now returns `(measures, totalQN)` — the exact total QN accounting for all time sig changes. Stored as `rpp.lengthInQN` in `loadRppToQueue()`. Used directly in `recalculateQueueOffsets()` and `createMultiRppRegions()` instead of lossy `measures * qnPerMeasure`. Shape-aware time integration added for linear ramps.
+
+**Fixed (v2.5): Last tempo point shape causing unwanted transition between RPPs**
+
+- Root cause: The last point's shape in a standalone RPP is irrelevant (REAPER ignores it). But in multi-RPP merge, the last point is no longer last — if its shape is 0 (gradual), it causes an unwanted tempo ramp to the next RPP's first tempo.
+- Fix: `extractTempoMap()` now forces `shape=1` (square/instant) on the last point of every RPP, preventing unwanted transitions across RPP boundaries.
+
+**Fixed (v2.5): extractTempoMap() multiline match + sanitizeChunk indent + SetTrackStateChunk check**
+
+- `extractTempoMap()`: `rppText:match("<TEMPOENVEX.-\n>")` used Lua's `.-` which cannot match newlines. Fixed with `find/sub` extraction.
+- `sanitizeChunk()`: Patterns like `\nAUXRECV.-\n` didn't match indented RPP lines. Fixed by adding `%s*` after `\n`.
+- `commitMultiRpp()`: `SetTrackStateChunk` return value was not checked. Fixed with return value check and warning log.
+- Diagnostic logging added: gsub replacement counts for POSITION and PT values.
 
 **Fixed (v2.5): extractTempoMap() duplicate points at position 0**
 
@@ -245,10 +251,10 @@ After `setTempoViaAPI()` runs, REAPER's `TimeMap2_beatsToTime(0, qnOffset)` give
 
 - Root cause: `extractTempoMap()` parsed TEMPOENVEX PT field 4 as "tension" but it is actually "timesig" (e.g., 262148 = 4/4). This caused time signature changes within an RPP to be lost, and `buildMergedTempoSection()` always wrote 4 fields (including spurious `0` tension) instead of 3 fields for points without time signature
 - Fix: Removed tension from data model, field 4 now correctly parsed as optional timesig. PT lines output as 3 fields (pos/bpm/shape) or 4 fields (pos/bpm/shape/timesig)
-- Project reload eliminated: `SetEnvelopeStateChunk` on master tempo envelope replaces the save+edit+reload cycle for both single-RPP (`importMarkersTempoPostCommit()`) and multi-RPP (`applyTempoViaEnvelopeChunk()`)
+- Project reload eliminated: Single-RPP uses `SetEnvelopeStateChunk` to copy source TEMPOENVEX directly (`importMarkersTempoPostCommit()`). Multi-RPP uses API markers only (`setTempoViaAPI()`) — envelope chunk is not needed since shape mapping is now correct.
 - Undo now works correctly for marker/tempo import (entire operation in single Undo block)
 - Multi-RPP retains `writeMultiRppTempoSection()` as fallback if `SetEnvelopeStateChunk` fails
-- Bug fix: `setTempoViaAPI()` and `importMarkersTempoPostCommit()` had inverted `lineartempo` mapping — `pt.shape == 0` (square) was mapped to `linear=true` (gradual ramp). Fixed to `pt.shape ~= 0`. Previously masked by plaintext overwrite+reload, exposed when switching to `SetEnvelopeStateChunk`.
+- Bug fix: `setTempoViaAPI()` and `importMarkersTempoPostCommit()` had inverted `lineartempo` mapping. In TEMPOENVEX, shape=0 means gradual (linear=true in API) and shape=1 means square (linear=false). Fixed to `linear = pt.shape == 0`. Previously masked by plaintext overwrite+reload, exposed when switching to `SetEnvelopeStateChunk`.
 - Bug fix: "Recalculation kick" (`SetTempoTimeSigMarker` re-set on marker 0) after `SetEnvelopeStateChunk` caused REAPER to rebuild envelope from internal markers, overriding the chunk. Removed; using `UpdateTimeline()` + `UpdateArrange()` instead.
 
 **Fixed (v2.5): Multi-RPP marker/region duplication and wrong positions**
@@ -258,6 +264,15 @@ After `setTempoViaAPI()` runs, REAPER's `TimeMap2_beatsToTime(0, qnOffset)` give
 - Root cause 3: `writeMultiRppTempoSection()` replaced everything between TEMPO and `<PROJBAY>`, deleting API-created MARKER lines
 - RPP format insight: Regions use TWO MARKER lines (start with name + end without name, same index). MARKER lines come AFTER TEMPOENVEX, before `<PROJBAY>`. Flags field is a bitmask (bit 0 = isRegion). Region-end lines have shortened format: `MARKER idx pos "" flags`
 - Fix: (1) `extractMarkersFromRpp()` now pairs region-end markers with start markers to set `rgnend`, skips end-markers from output. (2) `buildMergedTempoSection()` no longer writes MARKER lines — API-created markers are preserved. (3) `writeMultiRppTempoSection()` extracts and re-inserts MARKER lines when replacing TEMPO+TEMPOENVEX section
+
+**Fixed (v2.5): TEMPOENVEX PT positions treated as QN instead of seconds + shape values inverted**
+
+- Root cause 1 (critical): PT positions in TEMPOENVEX are in SECONDS, not quarter notes. Our code treated `pt.pos` as QN throughout — `calculateRppLengthInMeasures()` computed wrong durations (2247 vs 2714 measures for Mels), `loadRppToQueue()` had unnecessary time integration, `applyTempoViaEnvelopeChunk()` used `TimeMap2_timeToBeats` fullbeats instead of direct time, `buildMergedTempoSection()` used `qnOffset` instead of `timeOffset`.
+- Root cause 2 (critical): Shape values are inverted from our assumption. shape=0 means GRADUAL/linear ramp (API `linear=true`), shape=1 means SQUARE/instant (API `linear=false`). Affected `setTempoViaAPI()`, `calculateRppLengthInMeasures()`, `applyTempoViaEnvelopeChunk()` fallback shape, `extractTempoMap()` last-point fix.
+- Root cause 3: Regions and markers created BEFORE `applyTempoViaEnvelopeChunk()` were shifted by TIMELOCKMODE 2 (beat-locked) when the tempo map changed. Mels region showed 0-4350.97 instead of 0-4640.68.
+- Evidence: REAPER API debug showed PT 830.27 = time=830.27s, fullbeats=2560 QN. Constant formula (shape=1): 830.27*185/60=2560 QN matches. Gradual formula (shape=0): matches for tempo ramp segments.
+- Root cause 4: `applyTempoViaEnvelopeChunk()` deleted all API markers before `SetEnvelopeStateChunk`, causing beat-locked items (TIMELOCKMODE 2) to recalculate to default tempo during the gap between delete and re-set. Items shifted from 4646.92s to 4174.30s (~472s error). Additionally, the markers rebuilt from the envelope chunk had different internal beat positions than the original API markers, corrupting REAPER's measure calculations (e.g. 150 BPM marker at measure 2219 instead of 1921).
+- Fix: (1) `calculateRppLengthInMeasures()` rewritten to integrate BPM over time (pt.pos=seconds), shape==0 for gradual. (2) `loadRppToQueue()` simplified: `pt.time = pt.pos`. (3) `applyTempoViaEnvelopeChunk()` writes timepos directly as PT position, fallback shape fixed to `lineartempo and 0 or 1`. (4) `setTempoViaAPI()` fixed to `linear = pt.shape == 0`. (5) `extractTempoMap()` forces shape=1 (square) on last point of every RPP. (6) `buildMergedTempoSection()` uses `timeOffset` instead of `qnOffset`. (7) `recalculateQueueOffsets()` uses `rpp.lengthInMeasures` for measure display. (8) `commitMultiRpp()` no longer calls `applyTempoViaEnvelopeChunk()` — API markers have full shape fidelity after fix (4), making the envelope chunk redundant and harmful. Regions/markers created after track import.
 
 **Fixed (v2.3): Imported RPP media items showed as "offline"**
 
@@ -279,7 +294,7 @@ After `setTempoViaAPI()` runs, REAPER's `TimeMap2_beatsToTime(0, qnOffset)` give
 - v2.3 (Feb 2026): Editable track names, duplicate slot improvements, delete unused toggle, offline media fix, DrawList lock icon, help text rewrite
 - v2.3.1 (Feb 2026): Import speed optimization — cached chunks, removed redundant UI updates, targeted peak/media operations, deduplicated norm lookup
 - v2.4 (Feb 2026): LUFS Calibration System — measure reference items to create/update profiles, per-profile LUFS settings, gain reset before normalization
-- v2.5 (Feb 2026): Multi-RPP Import — import multiple RPP files into same template, merged tempo/markers, measure-based offsets, track consolidation, column-based UI, lane alignment, group flag copying, editable template track names
+- v2.5 (Feb 2026): Multi-RPP Import — import multiple RPP files into same template, merged tempo/markers, time-based offsets (seconds), track consolidation, column-based UI, lane alignment, group flag copying, editable template track names
 
 ## Files
 

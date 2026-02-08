@@ -14,7 +14,7 @@
 -- - Multi-RPP Import: Import multiple RPP files into the same template
 -- - Drag-and-drop reordering of RPP queue
 -- - Per-RPP regions created automatically
--- - Tempo/time-signature changes merged from all RPPs (measure-based)
+-- - Tempo/time-signature changes merged from all RPPs (time-based)
 -- - Markers imported with correct measure offsets
 -- - Configurable gap between RPPs (in measures, default: 2)
 -- - JS_ReaScriptAPI multi-file dialog support
@@ -501,10 +501,10 @@ local function importMarkersTempoPostCommit()
     -- Set tempo markers via API (for correct positioning)
     for _, pt in ipairs(tempoMap) do
         r.SetTempoTimeSigMarker(0, -1, -1, -1, pt.pos,
-            pt.bpm, pt.num or 0, pt.denom or 0, pt.shape ~= 0)  -- shape 0 = square, 1+ = linear
+            pt.bpm, pt.num or 0, pt.denom or 0, pt.shape == 0)  -- shape 0 = gradual (linear=true), shape 1 = square (linear=false)
     end
 
-    -- Apply full-fidelity envelope chunk (preserves shape — API only supports linear/square)
+    -- Apply source RPP's envelope chunk directly (copies TEMPOENVEX verbatim for single-RPP)
     if #tempoMap > 1 then
         local envexStart = src_txt:find("<TEMPOENVEX\n")
         if envexStart then
@@ -1816,8 +1816,16 @@ local function extractTempoMap(rppText)
             bpm = baseTempo.bpm,
             num = baseTempo.num,
             denom = baseTempo.denom,
-            shape = 0,
+            shape = 1,  -- shape 1 = square/instant (safe default)
         })
+    end
+
+    -- Force shape=1 (SQUARE/instant) on the last tempo point of every RPP.
+    -- In standalone context, the last point's shape is irrelevant (REAPER ignores it).
+    -- But in multi-RPP merge, the last point is no longer last — shape=0 (gradual)
+    -- would cause an unwanted ramp to the next RPP's first tempo.
+    if #points > 0 then
+        points[#points].shape = 1  -- 1 = square/instant (no transition across RPP boundary)
     end
 
     return points, baseTempo
@@ -1893,6 +1901,7 @@ local function extractMarkersFromRpp(rppText)
 end
 
 -- Calculate RPP length in measures (finds last item end, rounds up to complete measure)
+-- Returns: measures (integer, rounded up), totalQN (float, exact beat count)
 local function calculateRppLengthInMeasures(rppText, baseTempo, tempoMap)
     local maxEndTime = 0
 
@@ -1915,52 +1924,58 @@ local function calculateRppLengthInMeasures(rppText, baseTempo, tempoMap)
         local qnPerMeasure = (baseTempo.num or 4) * (4 / (baseTempo.denom or 4))
         local bpm = baseTempo.bpm or 120
         local totalBeats = maxEndTime * (bpm / 60)
-        return math.ceil(totalBeats / qnPerMeasure)
+        return math.ceil(totalBeats / qnPerMeasure), totalBeats, maxEndTime
     end
 
-    -- Build segments: convert beat-based tempo points to time-based
-    -- Each segment has: time (seconds), pos (QN), bpm, num, denom
+    -- Build segments from tempo map
+    -- PT positions in TEMPOENVEX are in SECONDS (not quarter notes!)
+    -- Shape: 0 = gradual/linear ramp, 1 = square/instant (inverted from API's lineartempo)
     local segs = {}
     local curNum, curDenom = baseTempo.num or 4, baseTempo.denom or 4
     for i, pt in ipairs(tempoMap) do
         if pt.num and pt.num > 0 then curNum = pt.num end
         if pt.denom and pt.denom > 0 then curDenom = pt.denom end
-        local t
-        if i == 1 then
-            t = 0
-        else
-            local prev = segs[i - 1]
-            t = prev.time + (pt.pos - prev.pos) * 60 / prev.bpm
-        end
-        segs[i] = { time = t, pos = pt.pos, bpm = pt.bpm, num = curNum, denom = curDenom }
+        segs[i] = { time = pt.pos, bpm = pt.bpm, shape = pt.shape, num = curNum, denom = curDenom }
     end
 
-    -- Convert maxEndTime (seconds) to beat position (QN)
+    -- Integrate BPM over time to get total QN at maxEndTime
+    -- Also track QN breakpoints for measure calculation
     local totalQN = 0
-    for i = #segs, 1, -1 do
-        local s = segs[i]
-        if maxEndTime >= s.time then
-            totalQN = s.pos + (maxEndTime - s.time) * (s.bpm / 60)
-            break
-        end
-    end
-
-    -- Convert totalQN to measures using time signature changes
-    local totalMeasures = 0
+    local qnBreaks = {}  -- {qnStart, num, denom} for each segment
     for i = 1, #segs do
         local s = segs[i]
-        local nextQN = (i < #segs) and segs[i + 1].pos or totalQN
-        if nextQN > totalQN then nextQN = totalQN end
-        local qnInSeg = nextQN - s.pos
-        if qnInSeg > 0 then
-            local qnPerMeasure = s.num * (4 / s.denom)
-            totalMeasures = totalMeasures + qnInSeg / qnPerMeasure
+        qnBreaks[i] = { qnStart = totalQN, num = s.num, denom = s.denom }
+        local nextTime = (i < #segs) and segs[i + 1].time or maxEndTime
+        if nextTime > maxEndTime then nextTime = maxEndTime end
+        local deltaTime = nextTime - s.time
+        if deltaTime > 0 then
+            -- shape=0 means GRADUAL (linear ramp), shape=1 means SQUARE (constant)
+            if s.shape == 0 and i < #segs and s.bpm ~= segs[i + 1].bpm then
+                -- Linear ramp: QN = deltaTime * (bpm2 - bpm1) / (60 * ln(bpm2/bpm1))
+                local bpm2 = segs[i + 1].bpm
+                totalQN = totalQN + deltaTime * (bpm2 - s.bpm) / (60 * math.log(bpm2 / s.bpm))
+            else
+                -- Constant tempo: QN = deltaTime * bpm / 60
+                totalQN = totalQN + deltaTime * s.bpm / 60
+            end
         end
-        if nextQN >= totalQN then break end
+        if nextTime >= maxEndTime then break end
     end
 
-    -- Round up to complete measure
-    return math.ceil(totalMeasures)
+    -- Convert totalQN to measures using time signature changes at QN breakpoints
+    local totalMeasures = 0
+    for i = 1, #qnBreaks do
+        local qnStart = qnBreaks[i].qnStart
+        local qnEnd = (i < #qnBreaks) and qnBreaks[i + 1].qnStart or totalQN
+        local qnInSeg = qnEnd - qnStart
+        if qnInSeg > 0 then
+            local qnPerMeasure = qnBreaks[i].num * (4 / qnBreaks[i].denom)
+            totalMeasures = totalMeasures + qnInSeg / qnPerMeasure
+        end
+    end
+
+    -- Round up to complete measure; also return totalQN for direct use (avoids lossy measures*qnPerMeasure)
+    return math.ceil(totalMeasures), totalQN, maxEndTime
 end
 
 -- Load RPP into the multi-RPP queue
@@ -1979,9 +1994,17 @@ local function loadRppToQueue(path)
     -- Extract markers
     local markers = extractMarkersFromRpp(txt)
 
-    -- Calculate length in measures
-    local lengthInMeasures = calculateRppLengthInMeasures(txt, baseTempo, tempoMap)
+    -- Calculate length in measures, quarter notes, and absolute time
+    local lengthInMeasures, lengthInQN, maxEndTime = calculateRppLengthInMeasures(txt, baseTempo, tempoMap)
     if lengthInMeasures < 1 then lengthInMeasures = 1 end
+
+    -- PT positions in TEMPOENVEX are already in seconds — assign directly
+    for _, pt in ipairs(tempoMap) do
+        pt.time = pt.pos
+    end
+
+    log(string.format("  loadRppToQueue '%s': measures=%d, lengthInQN=%.4f, maxEndTime=%.4fs, baseTempo=%.1f bpm %d/%d\n",
+        filename, lengthInMeasures, lengthInQN or -1, maxEndTime or 0, baseTempo.bpm, baseTempo.num or 4, baseTempo.denom or 4))
 
     -- Extract tracks (same as loadRecRPP)
     local regionCount = countRegionsInRPP(txt)
@@ -2021,8 +2044,11 @@ local function loadRppToQueue(path)
         rppText = txt,
         tracks = tracks,
         lengthInMeasures = lengthInMeasures,
+        lengthInQN = lengthInQN or (lengthInMeasures * (baseTempo.num or 4) * (4 / (baseTempo.denom or 4))),  -- fallback
+        maxEndTime = maxEndTime or 0,  -- RPP duration in seconds (max item end)
         measureOffset = 0,  -- Will be calculated
-        qnOffset = 0,       -- Will be calculated
+        qnOffset = 0,       -- Will be calculated (for tempo envelope only)
+        timeOffset = 0,     -- Will be calculated (for item/region/marker positioning)
         tempoMap = tempoMap,
         markers = markers,
         baseTempo = baseTempo,
@@ -2080,25 +2106,43 @@ local function moveRppInQueue(fromIdx, toIdx)
     recalculateQueueOffsets()
 end
 
--- Calculate measure offsets for all RPPs in queue
+-- Calculate measure/time/beat offsets for all RPPs in queue
+-- Time-based: timeOffset (seconds) is primary for item/region/marker positioning
+-- Beat-based: qnOffset is kept for tempo envelope PT positions only
 function recalculateQueueOffsets()
     local currentMeasure = 0
+    local currentTime = 0
     local currentQN = 0
 
     for i, rpp in ipairs(rppQueue) do
         rpp.measureOffset = currentMeasure
+        rpp.timeOffset = currentTime
         rpp.qnOffset = currentQN
 
-        -- QN per measure = num * (4 / denom), e.g. 6/8 = 3 QN, 4/4 = 4 QN
+        -- Calculate measure/time constants from base tempo
         local num = rpp.baseTempo.num or 4
         local denom = rpp.baseTempo.denom or 4
         local qnPerMeasure = num * (4 / denom)
+        local baseBPM = rpp.baseTempo.bpm or 120
+        local secPerMeasure = qnPerMeasure * 60 / baseBPM
 
-        local rppQN = rpp.lengthInMeasures * qnPerMeasure
-        local gapQN = multiRppSettings.gapInMeasures * qnPerMeasure  -- gap inherits RPP's time sig
+        -- Round RPP duration up to next measure boundary (at base tempo)
+        local rppMeasuresCeil = math.ceil((rpp.maxEndTime or 0) / secPerMeasure)
+        if rppMeasuresCeil < 1 then rppMeasuresCeil = 1 end
+        local rppTimeRounded = rppMeasuresCeil * secPerMeasure
+        local gapTime = multiRppSettings.gapInMeasures * secPerMeasure
 
-        currentMeasure = currentMeasure + rpp.lengthInMeasures + multiRppSettings.gapInMeasures
-        currentQN = currentQN + rppQN + gapQN
+        -- QN offset synchronized with time (both use rounded-up measure count)
+        local rppQNRounded = rppMeasuresCeil * qnPerMeasure
+        local gapQN = multiRppSettings.gapInMeasures * qnPerMeasure
+
+        log(string.format("  recalcQueueOff RPP %d '%s': measOff=%d timeOff=%.4fs qnOff=%.4f maxEnd=%.4fs lenMeas=%d rounded=%d meas\n",
+            i, rpp.name, rpp.measureOffset, rpp.timeOffset, rpp.qnOffset, rpp.maxEndTime or 0, rpp.lengthInMeasures or 0, rppMeasuresCeil))
+
+        -- Use actual lengthInMeasures (accounts for tempo/timesig changes) for measure display
+        currentMeasure = currentMeasure + (rpp.lengthInMeasures or rppMeasuresCeil) + multiRppSettings.gapInMeasures
+        currentTime = currentTime + rppTimeRounded + gapTime
+        currentQN = currentQN + rppQNRounded + gapQN
     end
 
     -- Rebuild recSources from all queued RPPs with rppIndex metadata
@@ -2156,10 +2200,10 @@ local function buildMergedTempoSection()
     local allPoints = {}
 
     for _, rpp in ipairs(rppQueue) do
-        local offsetBeats = rpp.qnOffset
+        local offsetSeconds = rpp.timeOffset  -- PT positions in TEMPOENVEX are in seconds
 
         for _, pt in ipairs(rpp.tempoMap) do
-            local adjPos = pt.pos + offsetBeats
+            local adjPos = pt.pos + offsetSeconds  -- pt.pos is seconds within RPP
 
             allPoints[#allPoints + 1] = {
                 pos = adjPos,
@@ -2203,28 +2247,85 @@ local function buildMergedTempoSection()
 end
 
 -- Apply full-fidelity tempo via SetEnvelopeStateChunk (no file I/O or reload needed)
--- Builds TEMPOENVEX chunk from rppQueue data and applies it to the master tempo envelope
+-- Reads beat positions from REAPER's API markers (set by setTempoViaAPI using time positions),
+-- then builds TEMPOENVEX chunk with correct shape/tension values from rppQueue data.
+-- NOTE: This function is retained but NOT called in commitMultiRpp().
+-- setTempoViaAPI() now maps shapes correctly (linear = pt.shape == 0), so API markers
+-- have full fidelity. Calling this function corrupted REAPER's internal beat positions
+-- because deleting API markers before SetEnvelopeStateChunk caused TIMELOCKMODE 2
+-- items to recalculate, and the rebuilt markers had different internal beat positions.
 local function applyTempoViaEnvelopeChunk()
     if #rppQueue == 0 then return false end
     log("\n=== Applying Full-Fidelity Tempo via Envelope Chunk ===\n")
 
-    -- Build envelope chunk from merged tempo data
-    local allPoints = {}
+    -- Build a lookup of shape values from rppQueue (keyed by approximate time position)
+    local shapeByTime = {}  -- { {time=, shape=, num=, denom=}, ... }
     for _, rpp in ipairs(rppQueue) do
         for _, pt in ipairs(rpp.tempoMap) do
-            allPoints[#allPoints + 1] = {
-                pos = pt.pos + rpp.qnOffset,
-                bpm = pt.bpm, shape = pt.shape,
-                num = pt.num, denom = pt.denom
+            shapeByTime[#shapeByTime + 1] = {
+                time = rpp.timeOffset + (pt.time or 0),
+                shape = pt.shape,
+                num = pt.num,
+                denom = pt.denom
             }
         end
     end
-    table.sort(allPoints, function(a, b) return a.pos < b.pos end)
-    if #allPoints < 2 then
+    table.sort(shapeByTime, function(a, b) return a.time < b.time end)
+
+    -- Read back API markers — PT positions in TEMPOENVEX are in SECONDS (not QN)
+    local existingCount = r.CountTempoTimeSigMarkers(0)
+    log(string.format("  Reading %d existing API tempo markers\n", existingCount))
+
+    if existingCount < 2 then
         log("  No tempo changes to apply (single tempo throughout)\n")
-        return true  -- Not an error, just nothing to do
+        return true
     end
 
+    -- Build allPoints by matching API markers with our shape data (both sorted by time)
+    local allPoints = {}
+    local shapeIdx = 1
+    for i = 0, existingCount - 1 do
+        local ok, timepos, measurepos, beatpos, bpm, tsnum, tsdenom, lineartempo =
+            r.GetTempoTimeSigMarker(0, i)
+        if ok then
+            -- Find matching shape from our rppQueue data (sequential match by closest time)
+            -- Shape mapping: lineartempo=true → gradual → shape=0; lineartempo=false → square → shape=1
+            local bestShape = lineartempo and 0 or 1  -- fallback from API linear flag
+            local bestNum, bestDenom = nil, nil
+            local bestDist = math.huge
+            -- Search forward from last match position for efficiency
+            for si = shapeIdx, #shapeByTime do
+                local dist = math.abs(shapeByTime[si].time - timepos)
+                if dist < bestDist then
+                    bestDist = dist
+                    bestShape = shapeByTime[si].shape
+                    bestNum = shapeByTime[si].num
+                    bestDenom = shapeByTime[si].denom
+                    shapeIdx = si  -- advance for next iteration
+                elseif dist > bestDist then
+                    break  -- past the closest match, stop searching
+                end
+            end
+
+            -- Use time sig from our data if API doesn't have it
+            local useNum = (tsnum > 0) and tsnum or bestNum
+            local useDenom = (tsdenom > 0) and tsdenom or bestDenom
+
+            allPoints[#allPoints + 1] = {
+                pos = timepos,  -- SECONDS — TEMPOENVEX PT positions are in seconds
+                bpm = bpm,
+                shape = bestShape,
+                num = useNum,
+                denom = useDenom
+            }
+
+            log(string.format("  API marker %d: time=%.4f bpm=%.4f shape=%d ts=%s\n",
+                i, timepos, bpm, bestShape,
+                useNum and string.format("%d/%d", useNum, useDenom or 4) or "-"))
+        end
+    end
+
+    -- Build TEMPOENVEX chunk
     local lines = {}
     lines[#lines + 1] = "<TEMPOENVEX"
     lines[#lines + 1] = "ACT 1 -1"
@@ -2248,8 +2349,6 @@ local function applyTempoViaEnvelopeChunk()
     -- Delete all existing API tempo markers first to prevent duplicates
     -- (REAPER's tempo envelope has a dual-source system: internal markers + envelope chunk.
     --  If we don't clear the markers, SetEnvelopeStateChunk merges rather than replaces.)
-    local existingCount = r.CountTempoTimeSigMarkers(0)
-    log(string.format("  Deleting %d existing API tempo markers before chunk apply\n", existingCount))
     for i = existingCount - 1, 0, -1 do
         r.DeleteTempoTimeSigMarker(0, i)
     end
@@ -2276,22 +2375,10 @@ local function applyTempoViaEnvelopeChunk()
     r.UpdateTimeline()
     r.UpdateArrange()
 
-    -- Verify: count resulting tempo markers
+    -- Verify
     local resultCount = r.CountTempoTimeSigMarkers(0)
     log(string.format("  Result: %d tempo markers after chunk apply (expected %d)\n",
         resultCount, #allPoints))
-
-    -- Verify the chunk was actually applied
-    local _, readback = r.GetEnvelopeStateChunk(tempoEnv, "", false)
-    if readback then
-        local ptCount = 0
-        for _ in readback:gmatch("PT [^\n]+") do ptCount = ptCount + 1 end
-        log(string.format("  Readback: %d PT lines in envelope chunk\n", ptCount))
-        if ptCount ~= #allPoints then
-            log("  WARNING: PT count mismatch! Expected " .. #allPoints .. ", got " .. ptCount .. "\n")
-            log("  Readback:\n" .. readback .. "\n")
-        end
-    end
 
     log("  Tempo envelope applied successfully\n")
     return true
@@ -2489,40 +2576,41 @@ local function setTempoViaAPI()
         r.DeleteTempoTimeSigMarker(0, i)
     end
 
-    -- Collect all tempo points with calculated offsets
+    -- Collect all tempo points with time-based offsets
     local allPoints = {}
 
     for _, rpp in ipairs(rppQueue) do
-        local offsetBeats = rpp.qnOffset
-
         for _, pt in ipairs(rpp.tempoMap) do
             allPoints[#allPoints + 1] = {
-                pos = pt.pos + offsetBeats,  -- Position in beats (QN)
+                timepos = rpp.timeOffset + (pt.time or 0),  -- Absolute project time in seconds
                 bpm = pt.bpm,
                 num = pt.num or 0,
                 denom = pt.denom or 0,
-                linear = pt.shape ~= 0  -- shape 0 = square (linear=false), shape 1+ = linear ramp (linear=true)
+                linear = pt.shape == 0  -- shape 0 = gradual (linear=true), shape 1 = square (linear=false)
             }
         end
     end
 
-    -- Sort by position
-    table.sort(allPoints, function(a, b) return a.pos < b.pos end)
+    -- Sort by time position
+    table.sort(allPoints, function(a, b) return a.timepos < b.timepos end)
 
     -- Set first point as project tempo
     if allPoints[1] then
         r.SetCurrentBPM(0, allPoints[1].bpm, true)
     end
 
-    -- Add all tempo markers via API using beat positions directly
-    -- (passing timepos=-1, measurepos=-1 lets REAPER use beatpos for placement)
+    -- Add all tempo markers via API using time positions
     for _, pt in ipairs(allPoints) do
-        r.SetTempoTimeSigMarker(0, -1, -1, -1, pt.pos,
+        r.SetTempoTimeSigMarker(0, -1, pt.timepos, -1, -1,
             pt.bpm, pt.num, pt.denom, pt.linear)
     end
 
     r.UpdateTimeline()
     log(string.format("  Set %d tempo markers via API\n", #allPoints))
+    for _, pt in ipairs(allPoints) do
+        log(string.format("  API tempo set: time=%.4fs bpm=%.4f linear=%s num=%d denom=%d\n",
+            pt.timepos, pt.bpm, tostring(pt.linear), pt.num, pt.denom))
+    end
 end
 
 -- Create regions for each RPP in the queue
@@ -2532,13 +2620,9 @@ local function createMultiRppRegions()
     log("\n=== Creating Multi-RPP Regions ===\n")
 
     for i, rpp in ipairs(rppQueue) do
-        -- Convert measure positions to time using current (API-set) tempo
-        local startBeats = rpp.qnOffset
-        local qnPerMeasure = (rpp.baseTempo.num or 4) * (4 / (rpp.baseTempo.denom or 4))
-        local endBeats = rpp.qnOffset + rpp.lengthInMeasures * qnPerMeasure
-
-        local startTime = r.TimeMap2_beatsToTime(0, startBeats)
-        local endTime = r.TimeMap2_beatsToTime(0, endBeats)
+        -- Use time-based offsets directly (no beat→time conversion needed)
+        local startTime = rpp.timeOffset
+        local endTime = rpp.timeOffset + (rpp.maxEndTime or 0)
 
         r.AddProjectMarker2(0, true, startTime, endTime, rpp.name, -1, 0)
         log(string.format("  Region '%s': %.2fs - %.2fs\n", rpp.name, startTime, endTime))
@@ -2552,8 +2636,8 @@ local function importMultiRppMarkers()
     log("\n=== Importing Multi-RPP Markers ===\n")
 
     for _, rpp in ipairs(rppQueue) do
-        -- Calculate time offset for this RPP
-        local offsetTime = r.TimeMap2_beatsToTime(0, rpp.qnOffset)
+        -- Use time-based offset directly
+        local offsetTime = rpp.timeOffset
 
         for _, m in ipairs(rpp.markers) do
             local adjPos = m.pos + offsetTime
@@ -2749,23 +2833,24 @@ local function commitMultiRpp()
     r.Undo_BeginBlock()
     r.PreventUIRefresh(1)
 
-    -- STEP 1: Set tempo via API (for correct positioning)
+    -- STEP 1: Set tempo via API (for correct positioning during track import)
     setTempoViaAPI()
 
-    -- STEP 2: Create regions for each RPP
-    createMultiRppRegions()
+    -- Tempo map is now fully set via API with correct shapes (linear = pt.shape == 0).
+    -- applyTempoViaEnvelopeChunk() is no longer called here — API markers have full fidelity
+    -- (shapes 0/1 map perfectly to linear true/false). Calling SetEnvelopeStateChunk after
+    -- deleting API markers corrupted REAPER's internal beat positions (TIMELOCKMODE 2 issue).
+    -- REAPER will generate the correct TEMPOENVEX from internal markers on save.
 
-    -- STEP 3: Import markers from all RPPs
-    importMultiRppMarkers()
-
-    -- Read regions back (for offset lookup)
+    -- Use time-based offsets directly (no beat→time conversion)
     local regionOffsets = {}  -- rppIdx -> startTime (seconds)
     for rppIdx, rpp in ipairs(rppQueue) do
-        regionOffsets[rppIdx] = r.TimeMap2_beatsToTime(0, rpp.qnOffset)
-        log(string.format("  RPP %d '%s' offset: %.2fs\n", rppIdx, rpp.name, regionOffsets[rppIdx]))
+        regionOffsets[rppIdx] = rpp.timeOffset
+        log(string.format("  RPP %d '%s': timeOffset=%.4fs\n",
+            rppIdx, rpp.name, rpp.timeOffset))
     end
 
-    -- STEP 4: Import tracks, shift, consolidate
+    -- STEP 2: Import tracks, shift, consolidate
     local matchedSet = {}
 
     for i, mixTr in ipairs(mixTargets) do
@@ -2975,7 +3060,7 @@ local function commitMultiRpp()
         ::nextTemplate::
     end
 
-    -- STEP 5: Delete unused template tracks (if enabled)
+    -- STEP 3: Delete unused template tracks (if enabled)
     if settings.deleteUnused then
         r.Main_OnCommand(40297, 0)  -- Unselect all tracks
 
@@ -2992,7 +3077,16 @@ local function commitMultiRpp()
         r.Main_OnCommand(40297, 0)  -- Unselect all
     end
 
-    -- STEP 6: Normalization (per region)
+    r.PreventUIRefresh(-1)
+    r.TrackList_AdjustWindows(false)
+    r.UpdateArrange()
+
+    -- STEP 4: Create regions and import markers
+    -- Tempo map is already final (set via API in STEP 1)
+    createMultiRppRegions()
+    importMultiRppMarkers()
+
+    -- STEP 5: Normalization (per region)
     if normalizeMode then
         log("\n=== Multi-RPP Normalization (per region) ===\n")
         local regions = scanRegions()
@@ -3034,14 +3128,10 @@ local function commitMultiRpp()
         end
     end
 
-    r.PreventUIRefresh(-1)
-    r.TrackList_AdjustWindows(false)
-    r.UpdateArrange()
-
-    -- STEP 7: Build peaks for new tracks
+    -- STEP 6: Build peaks for new tracks
     r.Main_OnCommand(40047, 0)  -- Build missing peaks
 
-    -- STEP 8: Minimize all tracks
+    -- STEP 7: Minimize all tracks
     r.PreventUIRefresh(1)
     for i = 0, r.CountTracks(0) - 1 do
         local tr = r.GetTrack(0, i)
@@ -3049,22 +3139,6 @@ local function commitMultiRpp()
     end
     r.PreventUIRefresh(-1)
     r.TrackList_AdjustWindows(false)
-
-    -- STEP 9: Apply full-fidelity tempo via envelope chunk (no reload needed)
-    if multiRppSettings.importMarkers then
-        local tempoOk = applyTempoViaEnvelopeChunk()
-        if not tempoOk then
-            -- Fallback: file-write + reload (old approach)
-            log("  Falling back to file-write tempo approach\n")
-            writeMultiRppTempoSection()
-            local _, cur_path = r.EnumProjects(-1, "")
-            if cur_path and cur_path ~= "" then
-                r.Undo_EndBlock("RAPID v" .. VERSION .. ": Multi-RPP Import", -1)
-                r.Main_openProject(cur_path)
-                return
-            end
-        end
-    end
 
     r.Undo_EndBlock("RAPID v" .. VERSION .. ": Multi-RPP Import", -1)
     uiFlags.close = true
@@ -5478,12 +5552,12 @@ local function commitMappings()
         
         local firstEntry = recSources[op.recIdxs[1]]
 
-        -- Multi-RPP: Calculate time offset from measure offset
+        -- Multi-RPP: Use time-based offset directly
         if multiRppSettings.enabled and firstEntry.rppMeasureOffset and firstEntry.rppMeasureOffset > 0 then
             local rppIdx = firstEntry.rppIndex or 1
             local rpp = rppQueue[rppIdx]
             if rpp then
-                _G.__mr_offset = rpp.qnOffset * (60 / (rpp.baseTempo.bpm or 120))
+                _G.__mr_offset = rpp.timeOffset or 0
             end
         else
             _G.__mr_offset = 0.0
@@ -5537,12 +5611,12 @@ local function commitMappings()
             local newTr = r.GetTrack(0, insertIdx)
             local entry = recSources[op.recIdxs[s]]
 
-            -- Multi-RPP: Calculate time offset for this duplicate
+            -- Multi-RPP: Use time-based offset directly
             if multiRppSettings.enabled and entry.rppMeasureOffset and entry.rppMeasureOffset > 0 then
                 local rppIdx = entry.rppIndex or 1
                 local rpp = rppQueue[rppIdx]
                 if rpp then
-                    _G.__mr_offset = rpp.qnOffset * (60 / (rpp.baseTempo.bpm or 120))
+                    _G.__mr_offset = rpp.timeOffset or 0
                 end
             else
                 _G.__mr_offset = 0.0
@@ -5938,22 +6012,6 @@ local function commitMappings()
     end
     r.PreventUIRefresh(-1)
     r.TrackList_AdjustWindows(false)
-
-    -- Multi-RPP: Apply full-fidelity tempo via envelope chunk
-    if multiRppSettings.enabled and #rppQueue > 1 then
-        local tempoOk = applyTempoViaEnvelopeChunk()
-        if not tempoOk then
-            -- Fallback: file-write + reload
-            log("  Falling back to file-write tempo approach\n")
-            writeMultiRppTempoSection()
-            local _, cur_path = r.EnumProjects(-1, "")
-            if cur_path and cur_path ~= "" then
-                r.Undo_EndBlock("RAPID v" .. VERSION .. ": Commit (Multi-RPP)", -1)
-                r.Main_openProject(cur_path)
-                return
-            end
-        end
-    end
 
     r.Undo_EndBlock("RAPID v" .. VERSION .. ": Commit", -1)
 
@@ -8066,7 +8124,7 @@ KEY FEATURES:
  Multi-RPP Import (NEW in v2.5)
   - Import multiple RPP files into one template project
   - Automatic regions per RPP (named from filename)
-  - Full tempo/time-signature merging (measure-based)
+  - Full tempo/time-signature merging (time-based)
   - Configurable gap between RPPs (in measures)
   - Drag-and-drop queue reordering
   - Column-based mapping with per-RPP dropdowns
@@ -8284,7 +8342,7 @@ Each RPP gets its own region, with tempo and markers merged correctly.
     shifted to correct position, consolidated onto one track
   - FX/Sends/routing copied from template
   - Normalization per region (if enabled)
-  - Full-fidelity tempo written via plaintext + project reload
+  - Tempo/time-signatures set via API with full shape fidelity
 
  Settings
   - Gap (measures): silence between RPPs (default: 2)

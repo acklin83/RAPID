@@ -2,7 +2,79 @@
 
 ---
 
-## Priority 0: Multi-RPP Import (DONE in v2.5)
+## Priority 0: Drag & Drop File Import (v2.6)
+
+Drag `.rpp` files and audio files (`.wav`, `.aif`, `.flac`, `.mp3`, etc.) directly from the OS file manager onto the RAPID main window to load them — no dialog needed. Subtle GUI hint communicates the feature without cluttering the interface.
+
+### Technical Foundation
+
+ReaImGui supports native OS file drops via `AcceptDragDropPayloadFiles` / `GetDragDropPayloadFile` inside a `BeginDragDropTarget` / `EndDragDropTarget` block on the main window. No JS_ReaScriptAPI dependency — works with base ReaImGui.
+
+### 0.1 File Classification & Drop Handler
+
+- [ ] Add `AUDIO_EXTENSIONS` lookup table (`wav`, `aif`, `aiff`, `mp3`, `flac`, `ogg`, `opus`, `wma`, `m4a`) in constants section (~line 100)
+- [ ] Implement `classifyDroppedFile(path)` — returns `"rpp"`, `"audio"`, or `nil` based on extension
+- [ ] Implement `handleDroppedFiles(files)` (~line 1743, after `clearRecList`):
+  - Separate files into RPP list and audio list
+  - **RPP handling:**
+    - Multi-RPP mode active → `loadRppToQueue(path)` for each RPP
+    - Single-RPP mode, 1 RPP → `loadRecRPP(path)`
+    - Single-RPP mode, multiple RPPs → auto-switch to Multi-RPP, load all into queue
+  - **Audio handling:** append to `recSources[]` as `{src="file", name=..., file=...}` (same as `loadRecFiles()`)
+  - **Mixed drops (RPP + audio):** load RPPs first, then audio files
+  - After loading: trigger `applyLastMap()` + auto-match (same post-load logic as existing buttons)
+  - Unknown file types: silently ignored
+
+### 0.2 Drop Target on Main Window
+
+- [ ] Add drop target in `loop()` (after `drawUI_body()`, before `r.ImGui_End(ctx)`):
+  ```lua
+  if r.ImGui_BeginDragDropTarget(ctx) then
+      local rv, count = r.ImGui_AcceptDragDropPayloadFiles(ctx)
+      if rv then
+          local files = {}
+          for i = 0, count - 1 do
+              local ok, fn = r.ImGui_GetDragDropPayloadFile(ctx, i)
+              if ok then files[#files + 1] = fn end
+          end
+          if #files > 0 then handleDroppedFiles(files) end
+      end
+      r.ImGui_EndDragDropTarget(ctx)
+  end
+  ```
+- [ ] Entire window acts as drop zone — no special child widget needed
+
+### 0.3 Visual Drop Feedback (hover highlight)
+
+- [ ] While files hover over window: draw subtle accent border via DrawList
+  - `ImGui_DrawList_AddRect` with `theme.accent_dim`, 6px rounding, 2px thickness
+  - Only visible during active drag — disappears on drop or leave
+
+### 0.4 Subtle GUI Hints
+
+Three low-key text hints in `theme.text_muted` that indicate drag & drop is available:
+
+- [ ] **Single-RPP, no RPP loaded yet** (~line 6218): add `"or drag & drop .rpp / audio files here"` below toolbar
+- [ ] **Multi-RPP, empty queue** (~line 6231): same hint text below the "Add .RPP" toolbar
+- [ ] **Table placeholder** (~line 6994): change existing `"(load .RPP or files)"` to `"(load or drop .rpp / audio files)"`
+
+### 0.5 Edge Cases
+
+- [ ] Multiple RPPs dropped in single-RPP mode → auto-enable Multi-RPP, load all into queue
+- [ ] Mixed RPP + audio drop → RPPs first, then audio
+- [ ] Unknown extensions → silently skip
+- [ ] REAPER running as admin on Windows → OS blocks drag & drop (known OS limitation, no fix possible)
+
+### Implementation Notes
+
+- **No new top-level `local` variables** — `AUDIO_EXTENSIONS` goes in constants block, functions are defined at function scope or consolidated into existing tables
+- **~75 lines total** — minimal footprint
+- **No JS_ReaScriptAPI dependency** — `AcceptDragDropPayloadFiles` is native ReaImGui
+- **Lua 200 local limit safe** — all additions are either table entries or function-scope locals
+
+---
+
+## Priority 0 (DONE): Multi-RPP Import (v2.5)
 
 ~~Import multiple RPP recording session files into the same mix template with merged tempo, regions, and track consolidation.~~
 

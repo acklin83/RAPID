@@ -4,7 +4,7 @@
 
 **RAPID** (Recording Auto-Placement & Intelligent Dynamics) — a professional workflow automation tool for REAPER (DAW), written as a single Lua script.
 
-- **Current Version:** 2.6 (February 2026)
+- **Current Version:** 2.6.1 (February 2026)
 - **Developer:** Frank
 - **License:** MIT
 
@@ -112,7 +112,7 @@
 - Tempo import via API (`SetTempoTimeSigMarker`) now has full fidelity — shape 0/1 maps perfectly to linear true/false. `SetEnvelopeStateChunk` is still used for single-RPP (copies source TEMPOENVEX directly) but NOT for multi-RPP (API markers are sufficient, envelope chunk corrupted internal state)
 - Both single-RPP and multi-RPP marker/tempo import use API-based approach (no project reload needed) — undo works correctly for both
 - **TEMPOENVEX PT positions are in SECONDS** (not quarter notes). Shape values: **shape=0 = gradual/linear ramp**, **shape=1 = square/instant**. This is the opposite of what the `linear` parameter in `SetTempoTimeSigMarker` suggests (`linear=true` corresponds to shape=0).
-- **Lua 200 local variable limit:** Main chunk is at ~194 locals. Adding new top-level `local` variables is dangerous — consolidate into existing tables or use forward declarations (which move, not add, locals). For-loop control variables consume 3 internal slots.
+- **Lua 200 local variable limit:** Main chunk is at ~198 locals (as of v2.6.1). Adding new top-level `local` variables is extremely dangerous — only 2 slots remain. Consolidate into existing tables or use forward declarations (which move, not add, locals). For-loop control variables consume 3 internal slots.
 - **Forward declarations:** 9 functions (`sanitizeChunk`, `fixChunkMediaPaths`, `postprocessTrackCopyRelink`, `copyFX`, `cloneSends`, `rewireReceives`, `copyTrackControls`, `shiftTrackItemsBy`, `replaceGroupFlagsInChunk`) are forward-declared before `commitMultiRpp` because they're defined later in the file. Their definitions use `X = function(...)` assignment form (not `local function`).
 
 ## Normalization System (v2.4+)
@@ -240,6 +240,27 @@ Drag `.rpp` files and audio files directly from the OS file manager onto the RAP
 - Handler logic is **inline in `loop()`** (not a separate `local function`) to avoid consuming Lua's 200 local variable limit in the main chunk
 - `AUDIO_EXTENSIONS` is a table constant (not a local function), safe for the limit
 
+## Live Template Sync (v2.6.1)
+
+### Concept
+
+Automatically detect when the user adds, removes, or renames tracks in the REAPER template project, and update RAPID's internal `mixTargets` list without losing existing mappings. Runs passively during the normal draw loop with negligible performance cost.
+
+### Architecture
+
+- **Two-tier detection in `loop()`** (runs before `apply_theme()`):
+  - **Every frame:** `r.CountTracks(0)` compared to `trackCache.lastCount` — near-zero cost (single C call + integer compare)
+  - **Every ~60 frames (~2x/sec):** `buildTrackFingerprint()` concatenates track count + all track names into a string, compared to `trackCache.lastFingerprint`
+- **Smart rebuild via `smartRebuildMixTargets()`:** On detected change, snapshots all existing mappings (`map`, `normMap`, `keepMap`, `fxMap`, `multiMap`, `multiNormMap`) keyed by template track name, calls `rebuildMixTargets()`, then restores mappings by name-matching to new indices
+- **State stored in `trackCache`:** `lastCount`, `lastFingerprint`, `fpFrame` — no new top-level locals needed
+- **Baseline initialized:** At script start and when Import mode is enabled via checkbox
+
+### Key Implementation Detail
+
+- `buildTrackFingerprint()` and `smartRebuildMixTargets()` are `local function`s (2 new top-level locals, bringing total to ~198/200)
+- Change detection only runs when `importMode` is active and `#mixTargets > 0`
+- Count change triggers fingerprint verification before rebuild (avoids false positives during REAPER internal operations)
+
 ## Resolved Issues
 
 **Fixed (v2.5): Multi-RPP spurious tempo markers from track envelope data (VOLENV2)**
@@ -330,6 +351,7 @@ Drag `.rpp` files and audio files directly from the OS file manager onto the RAP
 - v2.4 (Feb 2026): LUFS Calibration System — measure reference items to create/update profiles, per-profile LUFS settings, gain reset before normalization
 - v2.5 (Feb 2026): Multi-RPP Import — import multiple RPP files into same template, merged tempo/markers, time-based offsets (seconds), track consolidation, column-based UI, lane alignment, group flag copying, editable template track names
 - v2.6 (Feb 2026): Drag & Drop — drag .rpp and audio files from OS file manager onto main window, auto-classification, visual hover feedback, auto-match on drop, fixed multi-RPP auto-matching after import
+- v2.6.1 (Feb 2026): Live Template Sync — auto-detect template track changes (add/remove/rename), smart rebuild preserving mappings via name-based matching, throttled fingerprint check (~2x/sec)
 
 ## Files
 

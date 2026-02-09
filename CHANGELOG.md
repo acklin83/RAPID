@@ -4,6 +4,16 @@ Version history for RAPID.
 
 ---
 
+## v2.6.1 (February 2026)
+
+**Live Template Sync:**
+- Template track changes (add, remove, rename) are now detected automatically while the script is running
+- Track count checked every frame (near-zero cost); name fingerprint checked every ~60 frames (~2x/sec)
+- Existing track mappings, normalization settings, keep-name, and FX settings are preserved across rebuilds via name-based matching
+- Works in both single-RPP and multi-RPP import modes
+
+---
+
 ## v2.6 (February 2026)
 
 **Drag & Drop File Import:**

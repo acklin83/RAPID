@@ -46,7 +46,7 @@
 local r = reaper
 
 -- ===== VERSION =====
-local VERSION = "2.6"
+local VERSION = "2.6.1"
 local WINDOW_TITLE = "RAPID v" .. VERSION
 
 -- ===== Capability checks =====
@@ -345,6 +345,9 @@ local nameCache = setmetatable({}, {__mode="k"})
 local trackCache = {
     kids = setmetatable({}, {__mode="k"}),   -- was hasKids
     color = setmetatable({}, {__mode="k"}),  -- was effColorCache
+    lastCount = -1,         -- track count for change detection
+    lastFingerprint = "",   -- track names fingerprint for change detection
+    fpFrame = 0,            -- frame counter for throttled fingerprint check
 }
 
 _G.__mr_offset = 0.0
@@ -6065,6 +6068,9 @@ local function drawUI_body()
             rebuildMixTargets()
             map = {}
             normMap = {}
+            -- Initialize change detection baseline
+            trackCache.lastCount = r.CountTracks(0)
+            trackCache.lastFingerprint = buildTrackFingerprint()
         end
     end
 
@@ -9182,8 +9188,126 @@ For support or feature requests, check the REAPER forums.
 end
 
 
+-- ===== TEMPLATE CHANGE DETECTION =====
+-- Builds a fingerprint string from track count + all track names.
+-- Cheap enough to run every ~60 frames (~2x/sec).
+local function buildTrackFingerprint()
+    local N = r.CountTracks(0)
+    local parts = {tostring(N)}
+    for i = 0, N - 1 do
+        local tr = r.GetTrack(0, i)
+        if tr then
+            local _, nm = r.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
+            parts[#parts + 1] = nm or ""
+        end
+    end
+    return table.concat(parts, "|")
+end
+
+-- Rebuilds mixTargets and remaps all existing mappings by track name.
+-- Called automatically when template tracks change.
+local function smartRebuildMixTargets()
+    if not importMode or #mixTargets == 0 then return end
+
+    -- Snapshot old index->name mapping
+    local oldNames = {}
+    for i, tr in ipairs(mixTargets) do
+        oldNames[i] = nameCache[tr] or trName(tr)
+    end
+
+    -- Snapshot old mappings keyed by template track NAME
+    local oldMap, oldNormMap, oldKeepMap, oldFxMap = {}, {}, {}, {}
+    local oldMultiMap, oldMultiNormMap = {}, {}
+    local oldEditSlotNames = editState.slotNames or {}
+    for i = 1, #mixTargets do
+        local nm = oldNames[i]
+        if nm and nm ~= "" then
+            oldMap[nm] = map[i]
+            oldNormMap[nm] = normMap[i]
+            oldKeepMap[nm] = keepMap[i]
+            oldFxMap[nm] = fxMap[i]
+            if multiRppSettings.enabled then
+                oldMultiMap[nm] = multiMap[i]
+                oldMultiNormMap[nm] = multiNormMap[i]
+            end
+        end
+    end
+
+    -- Rebuild
+    rebuildMixTargets()
+
+    -- Re-initialize maps for new size
+    local M = #mixTargets
+    map = {}
+    normMap = {}
+    keepMap = {}
+    fxMap = {}
+    if multiRppSettings.enabled then
+        multiMap = {}
+        multiNormMap = {}
+    end
+
+    -- Restore mappings by name match
+    for i = 1, M do
+        local nm = nameCache[mixTargets[i]] or trName(mixTargets[i])
+        if nm and nm ~= "" and oldMap[nm] then
+            map[i] = oldMap[nm]
+            normMap[i] = oldNormMap[nm]
+            keepMap[i] = oldKeepMap[nm]
+            fxMap[i] = oldFxMap[nm]
+            if multiRppSettings.enabled then
+                multiMap[i] = oldMultiMap[nm]
+                multiNormMap[i] = oldMultiNormMap[nm]
+            end
+        else
+            map[i] = {0}
+            normMap[i] = {}
+            normMap[i][1] = {profile = "-", targetPeak = -6}
+            keepMap[i] = {}
+            fxMap[i] = {}
+        end
+    end
+
+    _G.__mixTargets = mixTargets
+    _G.__map = map
+    log("Template tracks changed — rebuilt with mapping preservation\n")
+end
+
 -- ===== MAIN LOOP =====
 local function loop()
+    -- Track change detection (runs before rendering)
+    if importMode and #mixTargets > 0 then
+        local n = r.CountTracks(0)
+        local changed = false
+
+        -- Cheap check every frame: track count
+        if n ~= trackCache.lastCount then
+            trackCache.lastCount = n
+            changed = true
+        end
+
+        -- Throttled check every ~60 frames: name fingerprint
+        trackCache.fpFrame = trackCache.fpFrame + 1
+        if not changed and trackCache.fpFrame >= 60 then
+            trackCache.fpFrame = 0
+            local fp = buildTrackFingerprint()
+            if fp ~= trackCache.lastFingerprint then
+                trackCache.lastFingerprint = fp
+                changed = true
+            end
+        end
+
+        if changed then
+            local fp = buildTrackFingerprint()
+            if fp ~= trackCache.lastFingerprint then
+                trackCache.lastFingerprint = fp
+                smartRebuildMixTargets()
+            else
+                trackCache.lastFingerprint = fp
+            end
+        end
+    end
+
     apply_theme()
 
     if not uiFlags.winInit then
@@ -9343,6 +9467,10 @@ do
         protectedSet = loadProtected()
         keepSet = loadKeep()
         applyLastMap()
+
+        -- Initialize change detection baseline
+        trackCache.lastCount = r.CountTracks(0)
+        trackCache.lastFingerprint = buildTrackFingerprint()
     end
     
     if normalizeMode and not importMode then

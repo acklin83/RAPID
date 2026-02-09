@@ -6070,7 +6070,7 @@ local function drawUI_body()
             normMap = {}
             -- Initialize change detection baseline
             trackCache.lastCount = r.CountTracks(0)
-            trackCache.lastFingerprint = buildTrackFingerprint()
+            trackCache.lastFingerprint = trackCache.buildFingerprint()
         end
     end
 
@@ -9189,9 +9189,11 @@ end
 
 
 -- ===== TEMPLATE CHANGE DETECTION =====
+-- Stored in trackCache to avoid consuming top-level local slots (Lua 200 limit).
+
 -- Builds a fingerprint string from track count + all track names.
 -- Cheap enough to run every ~60 frames (~2x/sec).
-local function buildTrackFingerprint()
+trackCache.buildFingerprint = function()
     local N = r.CountTracks(0)
     local parts = {tostring(N)}
     for i = 0, N - 1 do
@@ -9206,7 +9208,7 @@ end
 
 -- Rebuilds mixTargets and remaps all existing mappings by track name.
 -- Called automatically when template tracks change.
-local function smartRebuildMixTargets()
+trackCache.smartRebuild = function()
     if not importMode or #mixTargets == 0 then return end
 
     -- Snapshot old index->name mapping
@@ -9218,7 +9220,6 @@ local function smartRebuildMixTargets()
     -- Snapshot old mappings keyed by template track NAME
     local oldMap, oldNormMap, oldKeepMap, oldFxMap = {}, {}, {}, {}
     local oldMultiMap, oldMultiNormMap = {}, {}
-    local oldEditSlotNames = editState.slotNames or {}
     for i = 1, #mixTargets do
         local nm = oldNames[i]
         if nm and nm ~= "" then
@@ -9290,7 +9291,7 @@ local function loop()
         trackCache.fpFrame = trackCache.fpFrame + 1
         if not changed and trackCache.fpFrame >= 60 then
             trackCache.fpFrame = 0
-            local fp = buildTrackFingerprint()
+            local fp = trackCache.buildFingerprint()
             if fp ~= trackCache.lastFingerprint then
                 trackCache.lastFingerprint = fp
                 changed = true
@@ -9298,10 +9299,10 @@ local function loop()
         end
 
         if changed then
-            local fp = buildTrackFingerprint()
+            local fp = trackCache.buildFingerprint()
             if fp ~= trackCache.lastFingerprint then
                 trackCache.lastFingerprint = fp
-                smartRebuildMixTargets()
+                trackCache.smartRebuild()
             else
                 trackCache.lastFingerprint = fp
             end
@@ -9470,7 +9471,7 @@ do
 
         -- Initialize change detection baseline
         trackCache.lastCount = r.CountTracks(0)
-        trackCache.lastFingerprint = buildTrackFingerprint()
+        trackCache.lastFingerprint = trackCache.buildFingerprint()
     end
     
     if normalizeMode and not importMode then

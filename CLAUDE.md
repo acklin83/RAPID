@@ -112,7 +112,7 @@
 - Tempo import via API (`SetTempoTimeSigMarker`) now has full fidelity — shape 0/1 maps perfectly to linear true/false. `SetEnvelopeStateChunk` is still used for single-RPP (copies source TEMPOENVEX directly) but NOT for multi-RPP (API markers are sufficient, envelope chunk corrupted internal state)
 - Both single-RPP and multi-RPP marker/tempo import use API-based approach (no project reload needed) — undo works correctly for both
 - **TEMPOENVEX PT positions are in SECONDS** (not quarter notes). Shape values: **shape=0 = gradual/linear ramp**, **shape=1 = square/instant**. This is the opposite of what the `linear` parameter in `SetTempoTimeSigMarker` suggests (`linear=true` corresponds to shape=0).
-- **Lua 200 local variable limit:** Main chunk is at ~198 locals (as of v2.6.1). Adding new top-level `local` variables is extremely dangerous — only 2 slots remain. Consolidate into existing tables or use forward declarations (which move, not add, locals). For-loop control variables consume 3 internal slots.
+- **Lua 200 local variable limit:** Main chunk is at ~196 locals (as of v2.6.1). Adding new top-level `local` variables is dangerous — only 4 slots remain. Consolidate into existing tables or use forward declarations (which move, not add, locals). For-loop control variables consume 3 internal slots.
 - **Forward declarations:** 9 functions (`sanitizeChunk`, `fixChunkMediaPaths`, `postprocessTrackCopyRelink`, `copyFX`, `cloneSends`, `rewireReceives`, `copyTrackControls`, `shiftTrackItemsBy`, `replaceGroupFlagsInChunk`) are forward-declared before `commitMultiRpp` because they're defined later in the file. Their definitions use `X = function(...)` assignment form (not `local function`).
 
 ## Normalization System (v2.4+)
@@ -257,7 +257,7 @@ Automatically detect when the user adds, removes, or renames tracks in the REAPE
 
 ### Key Implementation Detail
 
-- `buildTrackFingerprint()` and `smartRebuildMixTargets()` are `local function`s (2 new top-level locals, bringing total to ~198/200)
+- `trackCache.buildFingerprint()` and `trackCache.smartRebuild()` are stored as methods on the existing `trackCache` table (0 new top-level locals — avoids the Lua 200 limit)
 - Change detection only runs when `importMode` is active and `#mixTargets > 0`
 - Count change triggers fingerprint verification before rebuild (avoids false positives during REAPER internal operations)
 

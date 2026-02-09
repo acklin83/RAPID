@@ -6421,9 +6421,27 @@ local function drawUI_body()
         r.ImGui_TableSetupScrollFreeze(ctx, 3, 1)  -- Freeze Lock + Color + Template columns
         r.ImGui_TableHeadersRow(ctx)
 
-        -- Auto-match button row (per-RPP match buttons)
+        -- Auto-match button row (per-RPP match buttons + lock toggle-all)
         r.ImGui_TableNextRow(ctx)
+
+        -- Lock toggle-all (in button row, column 0)
         r.ImGui_TableSetColumnIndex(ctx, 0)
+        do
+            local anyProtected = false
+            for _, mtr in ipairs(mixTargets) do
+                local nm = nameCache[mtr] or trName(mtr)
+                if protectedSet[nm] then anyProtected = true; break end
+            end
+            local togChanged, togVal = r.ImGui_Checkbox(ctx, "##lockall_multi", anyProtected)
+            if togChanged then
+                local newState = not anyProtected
+                for _, mtr in ipairs(mixTargets) do
+                    local nm = nameCache[mtr] or trName(mtr)
+                    protectedSet[nm] = newState or nil
+                end
+                saveProtected()
+            end
+        end
 
         for rppIdx = 1, numRpps do
             r.ImGui_TableSetColumnIndex(ctx, 2 + rppIdx)
@@ -6462,10 +6480,21 @@ local function drawUI_body()
 
             r.ImGui_TableNextRow(ctx)
 
-            -- Lock column
+            -- Lock column (with drag-to-paint)
             r.ImGui_TableSetColumnIndex(ctx, 0)
             local lockChanged, lockVal = r.ImGui_Checkbox(ctx, "##lock_" .. i, isLocked)
-            if lockChanged then
+
+            -- Drag-to-paint for lock checkbox
+            if r.ImGui_IsItemHovered(ctx, r.ImGui_HoveredFlags_AllowWhenBlockedByActiveItem()) then
+                if dragState.lock == nil and r.ImGui_IsMouseClicked(ctx, r.ImGui_MouseButton_Left()) then
+                    dragState.lock = not isLocked
+                    protectedSet[trackName] = dragState.lock or nil
+                elseif dragState.lock ~= nil and dragState.lock ~= isLocked then
+                    protectedSet[trackName] = dragState.lock or nil
+                end
+            end
+
+            if lockChanged and dragState.lock == nil then
                 protectedSet[trackName] = lockVal or nil
                 saveProtected()
             end

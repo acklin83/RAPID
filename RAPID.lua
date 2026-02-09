@@ -1,4 +1,4 @@
--- RAPID - Recording Auto-Placement & Intelligent Dynamics v2.6
+-- RAPID - Recording Auto-Placement & Intelligent Dynamics v2.6.1
 --
 -- Unified version combining RAPID (Import & Mapping) with Little Joe (Normalize-Only)
 --

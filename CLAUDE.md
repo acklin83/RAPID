@@ -351,7 +351,7 @@ Automatically detect when the user adds, removes, or renames tracks in the REAPE
 - v2.4 (Feb 2026): LUFS Calibration System — measure reference items to create/update profiles, per-profile LUFS settings, gain reset before normalization
 - v2.5 (Feb 2026): Multi-RPP Import — import multiple RPP files into same template, merged tempo/markers, time-based offsets (seconds), track consolidation, column-based UI, lane alignment, group flag copying, editable template track names
 - v2.6 (Feb 2026): Drag & Drop — drag .rpp and audio files from OS file manager onto main window, auto-classification, visual hover feedback, auto-match on drop, fixed multi-RPP auto-matching after import
-- v2.6.1 (Feb 2026): Live Template Sync — auto-detect template track changes (add/remove/rename), smart rebuild preserving mappings via name-based matching, throttled fingerprint check (~2x/sec)
+- v2.6.1 (Feb 2026): Live Template Sync — auto-detect template track changes (add/remove/rename), smart rebuild preserving mappings via name-based matching, throttled fingerprint check (~2x/sec). Multi-RPP UI cleanup — removed redundant "Match All" from table (toolbar buttons now mode-aware), added lock drag-to-paint and header toggle-all, moved drag-state reset to shared scope
 
 ## Files
 

@@ -12,6 +12,12 @@ Version history for RAPID.
 - Existing track mappings, normalization settings, keep-name, and FX settings are preserved across rebuilds via name-based matching
 - Works in both single-RPP and multi-RPP import modes
 
+**Multi-RPP UI Improvements:**
+- Removed redundant "Match All" button from multi-RPP table — toolbar "Auto-match Tracks" now handles both modes
+- Toolbar "Auto-match Tracks" and "Auto-match Profiles" are now mode-aware (call correct single/multi functions)
+- Lock column: drag-to-paint and header click toggle-all now work in multi-RPP (matching single-RPP behavior)
+- Fixed: drag-state reset was only running in single-RPP scope — now shared between both modes
+
 ---
 
 ## v2.6 (February 2026)

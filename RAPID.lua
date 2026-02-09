@@ -6216,13 +6216,21 @@ local function drawUI_body()
     r.ImGui_SameLine(ctx)
 
     if sec_button("Auto-match Tracks##import") then
-        autosuggest()
+        if multiRppSettings.enabled then
+            multiRppAutoMatchAll()
+        else
+            autosuggest()
+        end
     end
 
     if normalizeMode then
         r.ImGui_SameLine(ctx)
         if sec_button("Auto-match Profiles##import") then
-            autoMatchProfiles()
+            if multiRppSettings.enabled then
+                autoMatchProfilesMulti()
+            else
+                autoMatchProfiles()
+            end
         end
     end
 
@@ -6386,10 +6394,11 @@ local function drawUI_body()
     -- ===== MULTI-RPP COLUMN MAPPING TABLE =====
     if multiRppSettings.enabled and #rppQueue > 0 then
 
-    -- Columns: [Lock] [Template] [RPP1] [RPP2] ... [RPPn] [Normalize?] [Peak?]
+    -- Columns: [Lock] [Color] [Template] [RPP1] ... [RPPn] [Normalize?] [Peak?]
     local numRpps = #rppQueue
     local numColumns = 3 + numRpps  -- Lock + Color + Template + RPP columns
     if normalizeMode then numColumns = numColumns + 2 end  -- + Normalize + Peak
+    local normColBase = 2 + numRpps  -- Normalize = normColBase+1, Peak = normColBase+2
 
     local scrollFlags = flags | r.ImGui_TableFlags_ScrollX()
 
@@ -6412,14 +6421,9 @@ local function drawUI_body()
         r.ImGui_TableSetupScrollFreeze(ctx, 3, 1)  -- Freeze Lock + Color + Template columns
         r.ImGui_TableHeadersRow(ctx)
 
-        -- Auto-match button row
+        -- Auto-match button row (per-RPP match buttons)
         r.ImGui_TableNextRow(ctx)
         r.ImGui_TableSetColumnIndex(ctx, 0)
-        r.ImGui_TableSetColumnIndex(ctx, 2)
-        if sec_button("Match All##multi") then
-            multiRppAutoMatchAll()
-            if normalizeMode then autoMatchProfilesMulti() end
-        end
 
         for rppIdx = 1, numRpps do
             r.ImGui_TableSetColumnIndex(ctx, 2 + rppIdx)
@@ -6429,7 +6433,7 @@ local function drawUI_body()
         end
 
         if normalizeMode then
-            r.ImGui_TableSetColumnIndex(ctx, 2 + numRpps + 1)
+            r.ImGui_TableSetColumnIndex(ctx, normColBase + 1)
             if sec_button("Match##multinorm") then
                 autoMatchProfilesMulti()
             end
@@ -6584,7 +6588,7 @@ local function drawUI_body()
                 multiNormMap[i] = multiNormMap[i] or {profile = "-", targetPeak = -6}
 
                 -- Profile dropdown
-                r.ImGui_TableSetColumnIndex(ctx, 2 + numRpps + 1)
+                r.ImGui_TableSetColumnIndex(ctx, normColBase + 1)
                 r.ImGui_SetNextItemWidth(ctx, -1)
                 local currentProfile = multiNormMap[i].profile
 
@@ -6604,7 +6608,7 @@ local function drawUI_body()
                 end
 
                 -- Peak dB input
-                r.ImGui_TableSetColumnIndex(ctx, 2 + numRpps + 2)
+                r.ImGui_TableSetColumnIndex(ctx, normColBase + 2)
                 r.ImGui_SetNextItemWidth(ctx, -1)
                 local peakChanged, peakVal = r.ImGui_InputInt(ctx, "##peak_" .. i, multiNormMap[i].targetPeak)
                 if peakChanged then

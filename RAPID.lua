@@ -97,6 +97,11 @@ local DEFAULT_PROFILES = {
     {name = "Room", offset = 6, defaultPeak = -12}
 }
 
+local AUDIO_EXTENSIONS = {
+    wav=true, aif=true, aiff=true, mp3=true, flac=true,
+    ogg=true, opus=true, wma=true, m4a=true
+}
+
 local DEFAULT_BUS_KEYWORDS = {"MIXES", "FX", "Sidechains", "BUS", "Ref", "ANALOGUE"}
 
 local DEFAULT_ALIASES = {
@@ -6219,10 +6224,17 @@ local function drawUI_body()
         if recPath.rpp then
             r.ImGui_SameLine(ctx)
             r.ImGui_TextColored(ctx, theme.text_dim, "  RPP: " .. recPath.rpp)
+        elseif #recSources == 0 then
+            r.ImGui_SameLine(ctx)
+            r.ImGui_TextColored(ctx, theme.text_muted, "  or drag & drop .rpp / audio files here")
         end
     else
         r.ImGui_SameLine(ctx)
-        r.ImGui_TextColored(ctx, theme.text_dim, string.format("  %d RPPs queued", #rppQueue))
+        if #rppQueue > 0 then
+            r.ImGui_TextColored(ctx, theme.text_dim, string.format("  %d RPPs queued", #rppQueue))
+        else
+            r.ImGui_TextColored(ctx, theme.text_muted, "  drag & drop .rpp files here or use Add .RPP")
+        end
     end
 
     r.ImGui_Separator(ctx)
@@ -6992,7 +7004,7 @@ local function drawUI_body()
                 -- Column 4: Recording Sources
                 r.ImGui_TableSetColumnIndex(ctx, 4)
                 if #recSources == 0 then
-                    r.ImGui_Text(ctx, "(load .RPP or files)")
+                    r.ImGui_TextColored(ctx, theme.text_muted, "(load or drop .rpp / audio files)")
                 else
                     local current = slots[s] or 0
                     local preview = (current > 0 and recSources[current] and recSources[current].name) or "<none>"
@@ -9154,6 +9166,64 @@ For support or feature requests, check the REAPER forums.
 end
 
 
+-- ===== DRAG & DROP FILE HANDLER (v2.6) =====
+local function classifyDroppedFile(path)
+    local ext = path:match("%.([^%.]+)$")
+    if not ext then return nil end
+    ext = ext:lower()
+    if ext == "rpp" then return "rpp" end
+    if AUDIO_EXTENSIONS[ext] then return "audio" end
+    return nil
+end
+
+local function handleDroppedFiles(files)
+    local rpps, audios = {}, {}
+    for _, f in ipairs(files) do
+        local kind = classifyDroppedFile(f)
+        if kind == "rpp" then rpps[#rpps + 1] = f
+        elseif kind == "audio" then audios[#audios + 1] = f end
+    end
+
+    if #rpps == 0 and #audios == 0 then return end
+
+    -- RPP handling
+    if #rpps > 0 then
+        if multiRppSettings.enabled then
+            for _, p in ipairs(rpps) do loadRppToQueue(p) end
+        elseif #rpps == 1 then
+            recSources = {}
+            loadRecRPP(rpps[1])
+        else
+            -- Multiple RPPs in single mode → auto-switch to multi
+            multiRppSettings.enabled = true
+            if recPath.rpp and recPath.rpp ~= "" then
+                rppQueue = {}
+                multiMap = {}
+                multiNormMap = {}
+                loadRppToQueue(recPath.rpp)
+            end
+            for _, p in ipairs(rpps) do loadRppToQueue(p) end
+        end
+    end
+
+    -- Audio handling (single-RPP mode only)
+    if #audios > 0 and not multiRppSettings.enabled then
+        for _, f in ipairs(audios) do
+            recSources[#recSources + 1] = {
+                src = "file",
+                name = (f:match("([^/\\]+)$") or f):gsub("%.[%w%d_-]+$", ""),
+                file = f
+            }
+        end
+        _G.__recSources = recSources
+    end
+
+    -- Post-load: same logic as existing Load buttons
+    applyLastMap()
+    if settings.autoMatchTracksOnImport then autosuggest() end
+    if settings.autoMatchProfilesOnImport and normalizeMode then autoMatchProfiles() end
+end
+
 -- ===== MAIN LOOP =====
 local function loop()
     apply_theme()
@@ -9174,6 +9244,26 @@ local function loop()
     if visible then
         local ok, err = xpcall(function()
             drawUI_body()
+
+            -- File drop target (entire window)
+            if r.ImGui_BeginDragDropTarget(ctx) then
+                local dl = r.ImGui_GetWindowDrawList(ctx)
+                local wx, wy = r.ImGui_GetWindowPos(ctx)
+                local ww, wh = r.ImGui_GetWindowSize(ctx)
+                r.ImGui_DrawList_AddRect(dl, wx, wy, wx + ww, wy + wh, theme.accent_dim, 6, 0, 2)
+
+                local rv, count = r.ImGui_AcceptDragDropPayloadFiles(ctx)
+                if rv then
+                    local dropped = {}
+                    for i = 0, count - 1 do
+                        local fok, fn = r.ImGui_GetDragDropPayloadFile(ctx, i)
+                        if fok then dropped[#dropped + 1] = fn end
+                    end
+                    if #dropped > 0 then handleDroppedFiles(dropped) end
+                end
+                r.ImGui_EndDragDropTarget(ctx)
+            end
+
             local wx, wy = r.ImGui_GetWindowPos(ctx)
             local ww, wh = r.ImGui_GetWindowSize(ctx)
             if wx and wy and ww and wh then

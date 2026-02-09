@@ -6419,29 +6419,44 @@ local function drawUI_body()
         end
 
         r.ImGui_TableSetupScrollFreeze(ctx, 3, 1)  -- Freeze Lock + Color + Template columns
-        r.ImGui_TableHeadersRow(ctx)
+        -- Custom header row (for lock toggle-all click)
+        r.ImGui_TableNextRow(ctx, r.ImGui_TableRowFlags_Headers())
 
-        -- Auto-match button row (per-RPP match buttons + lock toggle-all)
-        r.ImGui_TableNextRow(ctx)
-
-        -- Lock toggle-all (in button row, column 0)
+        -- Lock header: click to toggle all
         r.ImGui_TableSetColumnIndex(ctx, 0)
-        do
+        if r.ImGui_Selectable(ctx, "##lockheader_multi", false) then
             local anyProtected = false
             for _, mtr in ipairs(mixTargets) do
                 local nm = nameCache[mtr] or trName(mtr)
                 if protectedSet[nm] then anyProtected = true; break end
             end
-            local togChanged, togVal = r.ImGui_Checkbox(ctx, "##lockall_multi", anyProtected)
-            if togChanged then
-                local newState = not anyProtected
-                for _, mtr in ipairs(mixTargets) do
-                    local nm = nameCache[mtr] or trName(mtr)
-                    protectedSet[nm] = newState or nil
-                end
-                saveProtected()
+            local newState = not anyProtected
+            for _, mtr in ipairs(mixTargets) do
+                local nm = nameCache[mtr] or trName(mtr)
+                protectedSet[nm] = newState or nil
             end
+            saveProtected()
         end
+
+        -- Remaining headers rendered normally
+        r.ImGui_TableSetColumnIndex(ctx, 1)
+        r.ImGui_TableHeader(ctx, "##color")
+        r.ImGui_TableSetColumnIndex(ctx, 2)
+        r.ImGui_TableHeader(ctx, "Template")
+        for rppIdx, rpp in ipairs(rppQueue) do
+            r.ImGui_TableSetColumnIndex(ctx, 2 + rppIdx)
+            r.ImGui_TableHeader(ctx, rpp.name)
+        end
+        if normalizeMode then
+            r.ImGui_TableSetColumnIndex(ctx, normColBase + 1)
+            r.ImGui_TableHeader(ctx, "Normalize")
+            r.ImGui_TableSetColumnIndex(ctx, normColBase + 2)
+            r.ImGui_TableHeader(ctx, "Peak dB")
+        end
+
+        -- Auto-match button row (per-RPP match buttons)
+        r.ImGui_TableNextRow(ctx)
+        r.ImGui_TableSetColumnIndex(ctx, 0)
 
         for rppIdx = 1, numRpps do
             r.ImGui_TableSetColumnIndex(ctx, 2 + rppIdx)

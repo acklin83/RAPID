@@ -7338,18 +7338,18 @@ local function drawUI_body()
         r.ImGui_EndTable(ctx)
     end
     
-    -- Clear drag states when mouse is released (drag complete)
+    end  -- end of if multiRppSettings.enabled ... else (single-RPP table)
+
+    -- Clear drag states when mouse is released (drag complete) — runs in BOTH modes
     if r.ImGui_IsMouseReleased(ctx, r.ImGui_MouseButton_Left()) then
         if dragState.sel ~= nil then dragState.sel = nil end
-        if dragState.lock ~= nil then 
-            dragState.lock = nil 
+        if dragState.lock ~= nil then
+            dragState.lock = nil
             saveProtected()  -- Save when drag ends
         end
         if dragState.keepName ~= nil then dragState.keepName = nil end
         if dragState.keepFX ~= nil then dragState.keepFX = nil end
     end
-
-    end  -- end of if multiRppSettings.enabled ... else (single-RPP table)
 
     r.ImGui_Separator(ctx)
 

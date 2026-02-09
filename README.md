@@ -1,4 +1,4 @@
-# RAPID v2.5 - Recording Auto-Placement & Intelligent Dynamics
+# RAPID v2.6 - Recording Auto-Placement & Intelligent Dynamics
 
 A professional workflow tool for REAPER that combines automated track mapping with intelligent LUFS-based normalization.
 
@@ -11,7 +11,7 @@ A professional workflow tool for REAPER that combines automated track mapping wi
 - Preserves all FX, sends, routing, automation
 - Perfect for recurring workflows (podcasts, live recordings, etc.)
 
-**2. MULTI-RPP IMPORT (NEW in v2.5)**
+**2. MULTI-RPP IMPORT**
 - Import multiple RPP session files into the same template
 - Automatic regions, merged tempo/markers, configurable gap
 - Drag-and-drop reorder, column-based mapping UI
@@ -49,10 +49,16 @@ Your mode selection is saved and restored automatically.
 - Custom aliases for your workflow
 - Exact, contains, and similarity-based matching
 
-**Multi-RPP Import (NEW)**
+**Drag & Drop Import (NEW in v2.6)**
+- Drag `.rpp` and audio files from OS file manager onto the RAPID window
+- Auto-classification: `.rpp` → import, audio → add as sources
+- Multiple `.rpp` files auto-switch to Multi-RPP mode
+- Auto-matching triggers after drop
+
+**Multi-RPP Import**
 - Import multiple RPP files into one template project
 - Automatic regions per RPP (named from filename)
-- Full tempo/time-signature merging (measure-based)
+- Full tempo/time-signature merging (time-based)
 - Configurable gap between RPPs (in measures)
 - Drag-and-drop queue reordering
 - Column-based mapping with per-RPP dropdowns
@@ -114,7 +120,7 @@ See the built-in Help window (Help button in RAPID) for:
 
 ## VERSION
 
-Current Version: **2.5**
+Current Version: **2.6**
 Last Updated: February 2026
 
 ---

@@ -4,6 +4,26 @@ Version history for RAPID.
 
 ---
 
+## v2.6 (February 2026)
+
+**Drag & Drop File Import:**
+- Drag `.rpp` and audio files directly from OS file manager onto the RAPID window
+- Auto-classification by extension: `.rpp` files go to import, audio files (`.wav`, `.aif`, `.mp3`, `.flac`, etc.) added as sources
+- Multiple `.rpp` files in a single drop auto-switch to Multi-RPP mode and load into queue
+- Visual hover feedback with indigo accent border during drag
+- No JS_ReaScriptAPI dependency — uses native ReaImGui `AcceptDragDropPayloadFiles`
+
+**Auto-Match Improvements:**
+- Auto-matching triggers automatically after import/drop (both single and multi-RPP)
+- Fixed: multi-RPP auto-matching after import was incorrectly calling single-RPP matcher
+
+**Architecture:**
+- Drop handler logic inline in `loop()` to avoid Lua 200 local variable limit
+- `AUDIO_EXTENSIONS` table constant for file type classification
+- Entire main window wrapped in `BeginChild("##dropzone")` as drop target
+
+---
+
 ## v2.5 (February 2026)
 
 **Multi-RPP Import:**

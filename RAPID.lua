@@ -9243,14 +9243,23 @@ local function loop()
 
     if visible then
         local ok, err = xpcall(function()
-            drawUI_body()
+            -- Wrap content in child so entire area is a file drop target
+            local ww, wh = r.ImGui_GetContentRegionAvail(ctx)
+            r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_WindowPadding(), 0, 0)
+            if r.ImGui_BeginChild(ctx, "##dropzone", ww, wh) then
+                r.ImGui_PopStyleVar(ctx)
+                drawUI_body()
+                r.ImGui_EndChild(ctx)
+            else
+                r.ImGui_PopStyleVar(ctx)
+            end
 
-            -- File drop target (entire window)
+            -- File drop target on the child (covers entire window content area)
             if r.ImGui_BeginDragDropTarget(ctx) then
-                local dl = r.ImGui_GetWindowDrawList(ctx)
+                local dl = r.ImGui_GetForegroundDrawList(ctx)
                 local wx, wy = r.ImGui_GetWindowPos(ctx)
-                local ww, wh = r.ImGui_GetWindowSize(ctx)
-                r.ImGui_DrawList_AddRect(dl, wx, wy, wx + ww, wy + wh, theme.accent_dim, 6, 0, 2)
+                local wsz_w, wsz_h = r.ImGui_GetWindowSize(ctx)
+                r.ImGui_DrawList_AddRect(dl, wx, wy, wx + wsz_w, wy + wsz_h, theme.accent, 6, 0, 2)
 
                 local rv, count = r.ImGui_AcceptDragDropPayloadFiles(ctx)
                 if rv then
@@ -9265,9 +9274,9 @@ local function loop()
             end
 
             local wx, wy = r.ImGui_GetWindowPos(ctx)
-            local ww, wh = r.ImGui_GetWindowSize(ctx)
-            if wx and wy and ww and wh then
-                saveWinGeom(math.floor(wx + 0.5), math.floor(wy + 0.5), math.floor(ww + 0.5), math.floor(wh + 0.5))
+            local wsz_w, wsz_h = r.ImGui_GetWindowSize(ctx)
+            if wx and wy and wsz_w and wsz_h then
+                saveWinGeom(math.floor(wx + 0.5), math.floor(wy + 0.5), math.floor(wsz_w + 0.5), math.floor(wsz_h + 0.5))
             end
         end, debug.traceback)
 

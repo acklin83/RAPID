@@ -4,7 +4,7 @@
 
 **RAPID** (Recording Auto-Placement & Intelligent Dynamics) — a professional workflow automation tool for REAPER (DAW), written as a single Lua script.
 
-- **Current Version:** 2.5 (February 2026)
+- **Current Version:** 2.6 (February 2026)
 - **Developer:** Frank
 - **License:** MIT
 
@@ -216,6 +216,30 @@ Import multiple RPP recording session files into the same mix template. Each RPP
 - Send Envelopes and Pooled Automation items are not explicitly shifted (deferred to future version)
 - Pooled automation is copied as-is (works because it's pooled by reference)
 
+## Drag & Drop File Import (v2.6)
+
+### Concept
+
+Drag `.rpp` files and audio files directly from the OS file manager onto the RAPID main window. Files are auto-classified by extension and routed to the correct loader. No JS_ReaScriptAPI dependency — uses native ReaImGui `AcceptDragDropPayloadFiles`.
+
+### Architecture
+
+- **Drop target:** Entire main window content wrapped in `BeginChild("##dropzone")` → `BeginDragDropTarget` on the child after `EndChild`
+- **File classification:** Extension-based lookup (`AUDIO_EXTENSIONS` table for `.wav`, `.aif`, `.mp3`, `.flac`, etc.; `.rpp` detected directly)
+- **Drop handler logic (inline in `loop()`):**
+  - `.rpp` files → `loadRecRPP()` (single) or `loadRppToQueue()` (multi-RPP)
+  - Multiple `.rpp` in single mode → auto-switches to Multi-RPP, loads all into queue
+  - Audio files → appended to `recSources[]` (single mode only)
+  - Mixed drops → RPPs first, then audio
+  - Post-load: `applyLastMap()` + auto-match (mode-aware: `autosuggest()`/`multiRppAutoMatchAll()`)
+- **Visual feedback:** Indigo accent border via `GetForegroundDrawList` while files hover over window
+- **GUI hints:** Three `text_muted` hints when no sources loaded ("or drag & drop .rpp / audio files here")
+
+### Key Implementation Detail
+
+- Handler logic is **inline in `loop()`** (not a separate `local function`) to avoid consuming Lua's 200 local variable limit in the main chunk
+- `AUDIO_EXTENSIONS` is a table constant (not a local function), safe for the limit
+
 ## Resolved Issues
 
 **Fixed (v2.5): Multi-RPP spurious tempo markers from track envelope data (VOLENV2)**
@@ -305,6 +329,7 @@ Import multiple RPP recording session files into the same mix template. Each RPP
 - v2.3.1 (Feb 2026): Import speed optimization — cached chunks, removed redundant UI updates, targeted peak/media operations, deduplicated norm lookup
 - v2.4 (Feb 2026): LUFS Calibration System — measure reference items to create/update profiles, per-profile LUFS settings, gain reset before normalization
 - v2.5 (Feb 2026): Multi-RPP Import — import multiple RPP files into same template, merged tempo/markers, time-based offsets (seconds), track consolidation, column-based UI, lane alignment, group flag copying, editable template track names
+- v2.6 (Feb 2026): Drag & Drop — drag .rpp and audio files from OS file manager onto main window, auto-classification, visual hover feedback, auto-match on drop, fixed multi-RPP auto-matching after import
 
 ## Files
 

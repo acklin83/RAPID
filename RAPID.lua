@@ -9166,64 +9166,6 @@ For support or feature requests, check the REAPER forums.
 end
 
 
--- ===== DRAG & DROP FILE HANDLER (v2.6) =====
-local function classifyDroppedFile(path)
-    local ext = path:match("%.([^%.]+)$")
-    if not ext then return nil end
-    ext = ext:lower()
-    if ext == "rpp" then return "rpp" end
-    if AUDIO_EXTENSIONS[ext] then return "audio" end
-    return nil
-end
-
-local function handleDroppedFiles(files)
-    local rpps, audios = {}, {}
-    for _, f in ipairs(files) do
-        local kind = classifyDroppedFile(f)
-        if kind == "rpp" then rpps[#rpps + 1] = f
-        elseif kind == "audio" then audios[#audios + 1] = f end
-    end
-
-    if #rpps == 0 and #audios == 0 then return end
-
-    -- RPP handling
-    if #rpps > 0 then
-        if multiRppSettings.enabled then
-            for _, p in ipairs(rpps) do loadRppToQueue(p) end
-        elseif #rpps == 1 then
-            recSources = {}
-            loadRecRPP(rpps[1])
-        else
-            -- Multiple RPPs in single mode → auto-switch to multi
-            multiRppSettings.enabled = true
-            if recPath.rpp and recPath.rpp ~= "" then
-                rppQueue = {}
-                multiMap = {}
-                multiNormMap = {}
-                loadRppToQueue(recPath.rpp)
-            end
-            for _, p in ipairs(rpps) do loadRppToQueue(p) end
-        end
-    end
-
-    -- Audio handling (single-RPP mode only)
-    if #audios > 0 and not multiRppSettings.enabled then
-        for _, f in ipairs(audios) do
-            recSources[#recSources + 1] = {
-                src = "file",
-                name = (f:match("([^/\\]+)$") or f):gsub("%.[%w%d_-]+$", ""),
-                file = f
-            }
-        end
-        _G.__recSources = recSources
-    end
-
-    -- Post-load: same logic as existing Load buttons
-    applyLastMap()
-    if settings.autoMatchTracksOnImport then autosuggest() end
-    if settings.autoMatchProfilesOnImport and normalizeMode then autoMatchProfiles() end
-end
-
 -- ===== MAIN LOOP =====
 local function loop()
     apply_theme()
@@ -9263,12 +9205,56 @@ local function loop()
 
                 local rv, count = r.ImGui_AcceptDragDropPayloadFiles(ctx)
                 if rv then
-                    local dropped = {}
+                    -- Classify and collect dropped files
+                    local rpps, audios = {}, {}
                     for i = 0, count - 1 do
                         local fok, fn = r.ImGui_GetDragDropPayloadFile(ctx, i)
-                        if fok then dropped[#dropped + 1] = fn end
+                        if fok then
+                            local ext = fn:match("%.([^%.]+)$")
+                            ext = ext and ext:lower() or ""
+                            if ext == "rpp" then rpps[#rpps + 1] = fn
+                            elseif AUDIO_EXTENSIONS[ext] then audios[#audios + 1] = fn end
+                        end
                     end
-                    if #dropped > 0 then handleDroppedFiles(dropped) end
+
+                    -- RPP handling
+                    if #rpps > 0 then
+                        if multiRppSettings.enabled then
+                            for _, p in ipairs(rpps) do loadRppToQueue(p) end
+                        elseif #rpps == 1 then
+                            recSources = {}
+                            loadRecRPP(rpps[1])
+                        else
+                            -- Multiple RPPs in single mode: auto-switch to multi
+                            multiRppSettings.enabled = true
+                            if recPath.rpp and recPath.rpp ~= "" then
+                                rppQueue = {}
+                                multiMap = {}
+                                multiNormMap = {}
+                                loadRppToQueue(recPath.rpp)
+                            end
+                            for _, p in ipairs(rpps) do loadRppToQueue(p) end
+                        end
+                    end
+
+                    -- Audio handling (single-RPP mode only)
+                    if #audios > 0 and not multiRppSettings.enabled then
+                        for _, f in ipairs(audios) do
+                            recSources[#recSources + 1] = {
+                                src = "file",
+                                name = (f:match("([^/\\]+)$") or f):gsub("%.[%w%d_-]+$", ""),
+                                file = f
+                            }
+                        end
+                        _G.__recSources = recSources
+                    end
+
+                    -- Post-load: same logic as existing Load buttons
+                    if #rpps > 0 or #audios > 0 then
+                        applyLastMap()
+                        if settings.autoMatchTracksOnImport then autosuggest() end
+                        if settings.autoMatchProfilesOnImport and normalizeMode then autoMatchProfiles() end
+                    end
                 end
                 r.ImGui_EndDragDropTarget(ctx)
             end

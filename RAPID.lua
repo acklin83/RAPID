@@ -338,6 +338,7 @@ local multiRppSettings = {
     createRegions = true,         -- Create region per RPP
     importMarkers = true,         -- Import markers from all RPPs
     alignLanes = true,            -- Move items to highest lane for visibility across RPPs
+    singleImportMarkers = false,  -- Single-RPP: import markers/tempo from source RPP on commit
 }
 
 -- Caches (grouped to reduce local count)
@@ -483,83 +484,6 @@ local function loadLastMapData()
     return t
 end
 
--- ===== IMPORT MARKERS/REGIONS/TEMPO (POST-COMMIT) =====
--- Single-RPP: Import tempo, markers and regions from source RPP via API (no file-write or reload)
-local function importMarkersTempoPostCommit()
-    if not recPath.rpp or recPath.rpp == "" then
-        log("No recording RPP loaded, skipping marker import\n")
-        return
-    end
-
-    log("\n=== Importing Markers/Regions/Tempo ===\n")
-    r.Undo_BeginBlock()
-
-    -- Read source RPP
-    local f = io.open(recPath.rpp, "rb")
-    if not f then
-        log("Cannot read source RPP\n")
-        return
-    end
-    local src_txt = f:read("*a"):gsub("^\239\187\191", ""):gsub("\r\n", "\n"):gsub("\r", "\n")
-    f:close()
-
-    -- 1. Extract & apply tempo
-    local tempoMap, baseTempo = extractTempoMap(src_txt)
-
-    -- Set base tempo
-    r.SetCurrentBPM(0, baseTempo.bpm, true)
-
-    -- Delete existing tempo markers
-    for i = r.CountTempoTimeSigMarkers(0) - 1, 0, -1 do
-        r.DeleteTempoTimeSigMarker(0, i)
-    end
-
-    -- Set tempo markers via API (for correct positioning)
-    for _, pt in ipairs(tempoMap) do
-        r.SetTempoTimeSigMarker(0, -1, -1, -1, pt.pos,
-            pt.bpm, pt.num or 0, pt.denom or 0, pt.shape == 0)  -- shape 0 = gradual (linear=true), shape 1 = square (linear=false)
-    end
-
-    -- Apply source RPP's envelope chunk directly (copies TEMPOENVEX verbatim for single-RPP)
-    if #tempoMap > 1 then
-        local envexStart = src_txt:find("<TEMPOENVEX\n")
-        if envexStart then
-            local envexEnd = src_txt:find("\n>", envexStart)
-            if envexEnd then
-                local envexChunk = src_txt:sub(envexStart, envexEnd + 1)
-                local masterTrack = r.GetMasterTrack(0)
-                local tempoEnv = masterTrack and r.GetTrackEnvelopeByName(masterTrack, "Tempo map")
-                if tempoEnv then
-                    local ok = r.SetEnvelopeStateChunk(tempoEnv, envexChunk, true)
-                    if ok then
-                        log("  Tempo envelope applied via chunk\n")
-                    else
-                        log("  WARNING: SetEnvelopeStateChunk failed, using API tempo only\n")
-                    end
-                end
-            end
-        end
-    end
-
-    -- 2. Import markers/regions via API
-    local markers = extractMarkersFromRpp(src_txt)
-    local markerCount, regionCount = 0, 0
-    for _, m in ipairs(markers) do
-        if m.isRegion then
-            r.AddProjectMarker2(0, true, m.pos, m.rgnend, m.name, -1, m.color)
-            regionCount = regionCount + 1
-        else
-            r.AddProjectMarker2(0, false, m.pos, 0, m.name, -1, m.color)
-            markerCount = markerCount + 1
-        end
-    end
-
-    r.UpdateTimeline()
-    r.Undo_EndBlock("RAPID: Import Markers/Tempomap", -1)
-    log(string.format("Markers/Regions/Tempo imported! (%d markers, %d regions, %d tempo points)\n",
-        markerCount, regionCount, #tempoMap))
-end
-
 -- ===== AUTO-RESUME NORMALIZATION AFTER RELOAD =====
 -- ===== .INI FILE HANDLING =====
 -- ===== .ini Migration & Saving/Loading =====
@@ -646,6 +570,7 @@ local function saveIni()
     f:write("CreateRegions=" .. tostring(multiRppSettings.createRegions) .. "\n")
     f:write("ImportMarkers=" .. tostring(multiRppSettings.importMarkers) .. "\n")
     f:write("AlignLanes=" .. tostring(multiRppSettings.alignLanes) .. "\n")
+    f:write("SingleImportMarkers=" .. tostring(multiRppSettings.singleImportMarkers) .. "\n")
 
     f:close()
 end
@@ -850,6 +775,7 @@ local function loadIni()
     multiRppSettings.createRegions = parseMultiRppBool("CreateRegions", true)
     multiRppSettings.importMarkers = parseMultiRppBool("ImportMarkers", true)
     multiRppSettings.alignLanes = parseMultiRppBool("AlignLanes", true)
+    multiRppSettings.singleImportMarkers = parseMultiRppBool("SingleImportMarkers", false)
 
     -- Sync global mode variables
     importMode = settings.importMode
@@ -1917,6 +1843,81 @@ local function extractMarkersFromRpp(rppText)
     end
 
     return markers
+end
+
+-- ===== IMPORT MARKERS/REGIONS/TEMPO (POST-COMMIT) =====
+-- Single-RPP: Import tempo, markers and regions from source RPP via API (no file-write or reload)
+local function importMarkersTempoPostCommit()
+    if not recPath.rpp or recPath.rpp == "" then
+        log("No recording RPP loaded, skipping marker import\n")
+        return
+    end
+
+    log("\n=== Importing Markers/Regions/Tempo ===\n")
+
+    -- Read source RPP
+    local f = io.open(recPath.rpp, "rb")
+    if not f then
+        log("Cannot read source RPP\n")
+        return
+    end
+    local src_txt = f:read("*a"):gsub("^\239\187\191", ""):gsub("\r\n", "\n"):gsub("\r", "\n")
+    f:close()
+
+    -- 1. Extract & apply tempo
+    local tempoMap, baseTempo = extractTempoMap(src_txt)
+
+    -- Set base tempo
+    r.SetCurrentBPM(0, baseTempo.bpm, true)
+
+    -- Delete existing tempo markers
+    for i = r.CountTempoTimeSigMarkers(0) - 1, 0, -1 do
+        r.DeleteTempoTimeSigMarker(0, i)
+    end
+
+    -- Set tempo markers via API (for correct positioning)
+    for _, pt in ipairs(tempoMap) do
+        r.SetTempoTimeSigMarker(0, -1, -1, -1, pt.pos,
+            pt.bpm, pt.num or 0, pt.denom or 0, pt.shape == 0)
+    end
+
+    -- Apply source RPP's envelope chunk directly (copies TEMPOENVEX verbatim for single-RPP)
+    if #tempoMap > 1 then
+        local envexStart = src_txt:find("<TEMPOENVEX\n")
+        if envexStart then
+            local envexEnd = src_txt:find("\n>", envexStart)
+            if envexEnd then
+                local envexChunk = src_txt:sub(envexStart, envexEnd + 1)
+                local masterTrack = r.GetMasterTrack(0)
+                local tempoEnv = masterTrack and r.GetTrackEnvelopeByName(masterTrack, "Tempo map")
+                if tempoEnv then
+                    local ok = r.SetEnvelopeStateChunk(tempoEnv, envexChunk, true)
+                    if ok then
+                        log("  Tempo envelope applied via chunk\n")
+                    else
+                        log("  WARNING: SetEnvelopeStateChunk failed, using API tempo only\n")
+                    end
+                end
+            end
+        end
+    end
+
+    -- 2. Import markers/regions via API
+    local markers = extractMarkersFromRpp(src_txt)
+    local markerCount, regionCount = 0, 0
+    for _, m in ipairs(markers) do
+        if m.isRegion then
+            r.AddProjectMarker2(0, true, m.pos, m.rgnend, m.name, -1, m.color)
+            regionCount = regionCount + 1
+        else
+            r.AddProjectMarker2(0, false, m.pos, 0, m.name, -1, m.color)
+            markerCount = markerCount + 1
+        end
+    end
+
+    r.UpdateTimeline()
+    log(string.format("Markers/Regions/Tempo imported! (%d markers, %d regions, %d tempo points)\n",
+        markerCount, regionCount, #tempoMap))
 end
 
 -- Calculate RPP length in measures (finds last item end, rounds up to complete measure)
@@ -6033,6 +6034,11 @@ local function commitMappings()
     r.PreventUIRefresh(-1)
     r.TrackList_AdjustWindows(false)
 
+    -- Import markers/tempo from source RPP if checkbox is enabled (single-RPP only)
+    if multiRppSettings.singleImportMarkers then
+        importMarkersTempoPostCommit()
+    end
+
     r.Undo_EndBlock("RAPID v" .. VERSION .. ": Commit", -1)
 
     uiFlags.close = true
@@ -6236,9 +6242,8 @@ local function drawUI_body()
 
     if not multiRppSettings.enabled and recPath.rpp then
         r.ImGui_SameLine(ctx)
-        if sec_button("Import Markers/Tempomap") then
-            importMarkersTempoPostCommit()
-        end
+        local mkChanged, mkVal = r.ImGui_Checkbox(ctx, "Import Markers/Tempomap", multiRppSettings.singleImportMarkers)
+        if mkChanged then multiRppSettings.singleImportMarkers = mkVal end
     end
 
     -- RPP path info (single mode) or queue info (multi mode)
@@ -8389,13 +8394,10 @@ AFTER COMMIT OPTIONS:
 
 MARKERS, REGIONS & TEMPO (Single RPP):
 
-Use "Import Markers/Tempomap" button to transfer:
+Enable "Import Markers/Tempomap" checkbox to include on commit:
 - Markers from recording session
 - Regions with names
 - Tempo map
-
-Note: This closes the script to prevent conflicts.
-Reopen RAPID after import completes.
 
 --------------------------------------------------------------------
 

@@ -1,3 +1,6 @@
+Never use any agents for this project to save tokens - only when user explicitly requests it.
+Be very prudent with token use!
+
 # CLAUDE.md — Project Context for Claude Code
 
 ## Project

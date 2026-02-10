@@ -7,7 +7,7 @@ Be very prudent with token use!
 
 **RAPID** (Recording Auto-Placement & Intelligent Dynamics) — a professional workflow automation tool for REAPER (DAW), written as a single Lua script.
 
-- **Current Version:** 2.6.1 (February 2026)
+- **Current Version:** 2.6.2 (February 2026)
 - **Developer:** Frank
 - **License:** MIT
 
@@ -61,7 +61,7 @@ Be very prudent with token use!
 - `deleteUnusedMode` — 0=keep unused, 1=delete unused (persisted in INI)
 - `calibrationWindow` — state for LUFS calibration popup (v2.4+)
 - `normProfiles` — array of profiles with optional per-profile LUFS settings (segmentSize, percentile, threshold)
-- `multiRppSettings` — `{enabled=false, gapInMeasures=2, createRegions=true, importMarkers=true, alignLanes=true}`
+- `multiRppSettings` — `{enabled=false, gapInMeasures=2, createRegions=true, importMarkers=true, alignLanes=true, singleImportMarkers=false}`
 - `rppQueue` — array of RPP entries: `{path, name, rppText, tracks[], baseTempo, tempoMap[], markers[], lengthInMeasures, lengthInQN, maxEndTime, measureOffset, qnOffset, timeOffset}`
 - `multiMap` — mapping: `multiMap[mixIdx][rppIdx] = trackIdxInRpp` (0 = unmapped)
 - `multiNormMap` — normalization per template track: `multiNormMap[mixIdx] = {profile, targetPeak}`
@@ -266,6 +266,18 @@ Automatically detect when the user adds, removes, or renames tracks in the REAPE
 
 ## Resolved Issues
 
+**Fixed (v2.6.2): Nameless regions not imported from source RPP**
+
+- Root cause: `extractMarkersFromRpp()` used `m.name ~= ""` to identify region-start markers and `m.name == ""` to identify region-end markers. REAPER allows unnamed regions where both start and end MARKER lines have `name=""`. Unnamed region starts were misidentified as end markers and filtered out.
+- Fix: Region pairing now uses occurrence order per idx — first occurrence = start, second = end. If start has no name but end does, name is adopted.
+
+**Fixed (v2.6.2): Multi-RPP track automation only imported from first RPP**
+
+- Root cause 1: `copyEnvelopePointsToTrack()` used API calls (`GetEnvelopePoint`/`InsertEnvelopePoint`) which are unreliable inside `PreventUIRefresh(1)` blocks.
+- Root cause 2: After `copyEnvelopePointsToTrack`, `replaceGroupFlagsInChunk` did `GetTrackStateChunk` → `SetTrackStateChunk` which overwrote the merged envelope data.
+- Root cause 3: The envelope tag detection pattern `%u[%u%d_]*ENV%u*` didn't match tags ending with digits (e.g. `VOLENV2`) because `%u*` only matches uppercase letters, not digits.
+- Fix: Envelope PT lines are now extracted from prepared chunks (strings, after position shift) before `SetTrackStateChunk`, collected across all RPPs into `savedEnvBlocks`. After all API operations (copyFX, cloneSends, GROUP_FLAGS), the final masterTrack chunk is read, existing PT lines replaced with saved ones, and missing envelopes created. Pattern fixed to `[%u%d]*`.
+
 **Fixed (v2.5): Multi-RPP spurious tempo markers from track envelope data (VOLENV2)**
 
 - Root cause: `extractTempoMap()` used `rppText:find("\n>", envexStart)` to find the closing `>` of the `<TEMPOENVEX>` block. But RPP files indent the closing `>` with spaces (e.g., `  >`), so `\n>` (which requires `>` immediately after newline) never matched the real TEMPOENVEX closing tag. Instead, it matched the first unindented `>` in the file — typically the final `>` closing `<REAPER_PROJECT>` at the end. This caused the entire RPP (all tracks, all envelopes) to be parsed as part of TEMPOENVEX, extracting VOLENV2 PT values (volume multipliers like 1.0, 1.67, 0.22) as tempo points. These appeared as nonsensical 0-4 BPM tempo changes after the second RPP region.
@@ -354,6 +366,7 @@ Automatically detect when the user adds, removes, or renames tracks in the REAPE
 - v2.4 (Feb 2026): LUFS Calibration System — measure reference items to create/update profiles, per-profile LUFS settings, gain reset before normalization
 - v2.5 (Feb 2026): Multi-RPP Import — import multiple RPP files into same template, merged tempo/markers, time-based offsets (seconds), track consolidation, column-based UI, lane alignment, group flag copying, editable template track names
 - v2.6 (Feb 2026): Drag & Drop — drag .rpp and audio files from OS file manager onto main window, auto-classification, visual hover feedback, auto-match on drop, fixed multi-RPP auto-matching after import
+- v2.6.2 (Feb 2026): Single-RPP marker/region/tempo import via checkbox (on commit). Fixed nameless region import (position-based pairing). Fixed multi-RPP automation merge (chunk-based envelope extraction, applied after all API ops)
 - v2.6.1 (Feb 2026): Live Template Sync — auto-detect template track changes (add/remove/rename), smart rebuild preserving mappings via name-based matching, throttled fingerprint check (~2x/sec). Multi-RPP UI cleanup — removed redundant "Match All" from table (toolbar buttons now mode-aware), added lock drag-to-paint and header toggle-all, moved drag-state reset to shared scope
 
 ## Files

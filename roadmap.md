@@ -1,12 +1,17 @@
 # RAPID Roadmap
 
-**Current Version:** 2.6.1 (February 2026)
+**Current Version:** 2.6.2 (February 2026)
 
 All planned features have been implemented. This file documents what was delivered.
 
 ---
 
 ## Completed
+
+### v2.6.2 — Marker/Region Import Fix + Multi-RPP Envelope Fix
+- Single-RPP: "Import Markers/Tempomap" checkbox (auto-imports on commit)
+- Fixed nameless region import (region pairing now position-based, not name-based)
+- Fixed multi-RPP automation: envelope data from all RPPs now correctly merged via chunk-based approach
 
 ### v2.6.1 — Live Template Sync
 - Auto-detect template track changes (add/remove/rename) during runtime

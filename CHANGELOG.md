@@ -4,6 +4,19 @@ Version history for RAPID.
 
 ---
 
+## v2.6.2 (February 2026)
+
+**Single-RPP Marker/Region/Tempo Import:**
+- "Import Markers/Tempomap" is now a checkbox (runs automatically on commit instead of separate button)
+- Setting persisted in INI
+
+**Bug Fixes:**
+- Fixed: nameless regions from source RPP were not imported — region start/end pairing assumed non-empty names on start markers, but REAPER allows unnamed regions (both markers have `""`)
+- Fixed: multi-RPP track automation only imported from first RPP — envelope points from subsequent RPPs were lost because (1) API-based envelope reads are unreliable inside `PreventUIRefresh`, (2) later `SetTrackStateChunk` calls (GROUP_FLAGS) overwrote merged envelopes, (3) envelope tag pattern didn't match tags ending with digits (e.g. `VOLENV2`)
+- Envelope merge rewritten: chunk-based extraction from prepared chunks before `SetTrackStateChunk`, collected across all RPPs, applied as final chunk write after all API operations
+
+---
+
 ## v2.6.1 (February 2026)
 
 **Live Template Sync:**

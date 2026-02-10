@@ -1,4 +1,4 @@
--- RAPID - Recording Auto-Placement & Intelligent Dynamics v2.6.1
+-- RAPID - Recording Auto-Placement & Intelligent Dynamics v2.6.2
 --
 -- Unified version combining RAPID (Import & Mapping) with Little Joe (Normalize-Only)
 --
@@ -9,6 +9,11 @@
 -- [ ] Import  [x] Normalize = Little Joe mode (normalize existing tracks)
 --
 -- See Project Notes for full documentation
+--
+-- NEW in v2.6.2:
+-- - Single-RPP: "Import Markers/Tempomap" checkbox (imports markers/regions/tempo on commit)
+-- - Fixed: nameless regions from source RPP not imported (pairing logic assumed non-empty names)
+-- - Fixed: multi-RPP track automation only imported from first RPP (chunk-based envelope merge)
 --
 -- NEW in v2.6:
 -- - Drag & drop .rpp and audio files from OS file manager onto window
@@ -46,7 +51,7 @@
 local r = reaper
 
 -- ===== VERSION =====
-local VERSION = "2.6.1"
+local VERSION = "2.6.2"
 local WINDOW_TITLE = "RAPID v" .. VERSION
 
 -- ===== Capability checks =====
@@ -1818,25 +1823,24 @@ local function extractMarkersFromRpp(rppText)
         end
     end
 
-    -- Second pass: pair region-end markers with their start markers
-    -- Region-end markers have empty name "" and same idx as their start
-    local regionStarts = {}  -- idx -> entry (last seen start for this idx)
-    for _, m in ipairs(allEntries) do
-        if m.isRegion and m.name ~= "" then
-            regionStarts[m.idx] = m
-        end
-    end
-
-    -- Filter: remove end-markers and set rgnend on matching starts
+    -- Second pass: pair region start/end markers by idx
+    -- Each region has TWO MARKER lines with same idx and flags bit0=1
+    -- First occurrence = start, second = end (nameless regions have "" for both)
+    local regionFirst = {}  -- idx -> first region entry
     local markers = {}
     for _, m in ipairs(allEntries) do
-        if m.isRegion and m.name == "" then
-            -- This is a region-end marker — set rgnend on matching start
-            local startEntry = regionStarts[m.idx]
-            if startEntry then
-                startEntry.rgnend = m.pos
+        if m.isRegion then
+            local first = regionFirst[m.idx]
+            if not first then
+                regionFirst[m.idx] = m
+                markers[#markers + 1] = m
+            else
+                -- Second occurrence = end marker
+                first.rgnend = m.pos
+                if first.name == "" and m.name ~= "" then
+                    first.name = m.name
+                end
             end
-            -- Don't add to output (skip region-end markers)
         else
             markers[#markers + 1] = m
         end
@@ -2532,55 +2536,74 @@ local function moveItemsToTrack(srcTrack, destTrack)
     end
 end
 
--- Copy envelope points from srcTrack to destTrack (additive, no clearing)
+-- Merge envelope points from srcTrack into destTrack via chunk manipulation
+-- (API-based envelope reads are unreliable inside PreventUIRefresh)
 local function copyEnvelopePointsToTrack(srcTrack, destTrack)
     if not (validTrack(srcTrack) and validTrack(destTrack)) then return end
 
-    local srcEnvCount = r.CountTrackEnvelopes(srcTrack)
-    for e = 0, srcEnvCount - 1 do
-        local srcEnv = r.GetTrackEnvelope(srcTrack, e)
-        if srcEnv then
-            -- Get envelope name to find matching dest envelope
-            local _, srcEnvName = r.GetEnvelopeName(srcEnv)
+    local _, srcChunk = r.GetTrackStateChunk(srcTrack, "", false)
+    local _, destChunk = r.GetTrackStateChunk(destTrack, "", false)
+    if not srcChunk or not destChunk then return end
 
-            -- Find or create matching envelope on dest track
-            local destEnv = nil
-            local destEnvCount = r.CountTrackEnvelopes(destTrack)
-            for d = 0, destEnvCount - 1 do
-                local env = r.GetTrackEnvelope(destTrack, d)
-                if env then
-                    local _, dName = r.GetEnvelopeName(env)
-                    if dName == srcEnvName then
-                        destEnv = env
-                        break
+    -- Extract track-level envelope blocks from src chunk
+    -- tag (e.g. "VOLENV2") -> { block=full text, pts="PT lines" }
+    -- Track envelopes are flat (no nested <> inside), skip FXCHAIN contents
+    local srcEnvs = {}
+    do
+        local inFxChain = 0
+        local curTag, curLines, curPts = nil, nil, nil
+        for line in srcChunk:gmatch("[^\n]+") do
+            if line:match("^%s*<FXCHAIN") then inFxChain = inFxChain + 1 end
+            if inFxChain > 0 then
+                if line:match("^%s*>") then inFxChain = inFxChain - 1 end
+            else
+                local tag = line:match("^%s*<(%u[%u%d_]*ENV[%u%d]*)$")
+                if tag and not tag:match("^AUX") and not tag:match("^POOLED") then
+                    curTag = tag; curLines = { line }; curPts = {}
+                elseif curTag then
+                    curLines[#curLines + 1] = line
+                    local pt = line:match("^(%s*PT%s+.+)")
+                    if pt then curPts[#curPts + 1] = pt end
+                    if line:match("^%s*>$") then
+                        if #curPts > 0 then
+                            srcEnvs[curTag] = {
+                                block = table.concat(curLines, "\n"),
+                                pts = table.concat(curPts, "\n")
+                            }
+                        end
+                        curTag = nil
                     end
                 end
             end
-
-            if not destEnv then
-                -- Try to make the envelope visible on dest track (creates it)
-                -- Use chunk-based approach to copy envelope structure
-                local _, srcEnvChunk = r.GetEnvelopeStateChunk(srcEnv, "", false)
-                if srcEnvChunk and srcEnvChunk ~= "" then
-                    -- Find the envelope on dest by enabling it via chunk manipulation
-                    -- For now, skip envelopes that don't exist on dest
-                    goto nextEnv
-                end
-            end
-
-            if destEnv then
-                local ptCount = r.CountEnvelopePoints(srcEnv)
-                for p = 0, ptCount - 1 do
-                    local retval, time, value, shape, tension, selected = r.GetEnvelopePoint(srcEnv, p)
-                    if retval then
-                        r.InsertEnvelopePoint(destEnv, time, value, shape, tension, selected, true)
-                    end
-                end
-                r.Envelope_SortPoints(destEnv)
-            end
-
-            ::nextEnv::
         end
+    end
+
+    local changed = false
+    for tag, env in pairs(srcEnvs) do
+        -- Find matching envelope in dest (track envelopes are flat, no nested <>)
+        local tagStart = destChunk:find("\n%s*<" .. tag .. "\n", 1, false)
+        if tagStart then
+            -- Skip past the opening <TAG line to find the closing >
+            local afterOpen = destChunk:find("\n", tagStart + 1)
+            if afterOpen then
+                local closePos = destChunk:find("\n%s*>", afterOpen)
+                if closePos then
+                    destChunk = destChunk:sub(1, closePos - 1) .. "\n" .. env.pts .. destChunk:sub(closePos)
+                    changed = true
+                end
+            end
+        else
+            -- Envelope doesn't exist on dest — append full block before track closing >
+            local trackClose = destChunk:find("\n>%s*$")
+            if trackClose then
+                destChunk = destChunk:sub(1, trackClose - 1) .. "\n" .. env.block .. destChunk:sub(trackClose)
+                changed = true
+            end
+        end
+    end
+
+    if changed then
+        r.SetTrackStateChunk(destTrack, destChunk, false)
     end
 end
 
@@ -2910,6 +2933,7 @@ local function commitMultiRpp()
 
         -- 4a: Import all mapped tracks (insert after template)
         local importedTracks = {}
+        local savedEnvBlocks = {}  -- collect envelope blocks from each RPP's prepared chunk
         for _, mp in ipairs(mappedRpps) do
             local insertIdx = mixIdx + #importedTracks + 1
             r.InsertTrackAtIndex(insertIdx, true)
@@ -2949,6 +2973,38 @@ local function commitMultiRpp()
                             pooledEnvText = pooledEnvText .. poolChunk
                         end
                         chunk = chunk:sub(1, closingPos - 1) .. pooledEnvText .. chunk:sub(closingPos)
+                    end
+                end
+
+                -- Save envelope blocks from the prepared chunk (before SetTrackStateChunk)
+                -- API operations (copyFX, etc.) may lose envelope data, so we re-apply later
+                do
+                    local inFx, curTag, curPts = 0, nil, nil
+                    local envData = {}
+                    for line in chunk:gmatch("[^\n]+") do
+                        if line:match("^%s*<FXCHAIN") then inFx = inFx + 1 end
+                        if inFx > 0 then
+                            if line:match("^%s*>") then inFx = inFx - 1 end
+                        else
+                            local tag = line:match("^%s*<(%u[%u%d_]*ENV[%u%d]*)$")
+                            if tag and not tag:match("^AUX") and not tag:match("^POOLED") then
+                                curTag = tag; curPts = {}
+                            elseif curTag then
+                                local pt = line:match("^(%s*PT%s+.+)")
+                                if pt then curPts[#curPts + 1] = pt end
+                                if line:match("^%s*>$") then
+                                    if #curPts > 0 then
+                                        if not envData[curTag] then envData[curTag] = {} end
+                                        for _, p in ipairs(curPts) do envData[curTag][#envData[curTag] + 1] = p end
+                                    end
+                                    curTag = nil
+                                end
+                            end
+                        end
+                    end
+                    for tag, pts in pairs(envData) do
+                        if not savedEnvBlocks[tag] then savedEnvBlocks[tag] = {} end
+                        for _, p in ipairs(pts) do savedEnvBlocks[tag][#savedEnvBlocks[tag] + 1] = p end
                     end
                 end
 
@@ -3035,14 +3091,13 @@ local function commitMultiRpp()
             end
         end
 
-        -- 4c: Consolidate all imported tracks onto the first one
+        -- 4c: Consolidate items onto the first track
         local masterTrack = importedTracks[1]
         for t = 2, #importedTracks do
             local srcTrack = importedTracks[t]
             if validTrack(srcTrack) then
                 moveItemsToTrack(srcTrack, masterTrack)
-                copyEnvelopePointsToTrack(srcTrack, masterTrack)
-                log(string.format("  Consolidated track %d onto master\n", t))
+                log(string.format("  Moved items from track %d onto master\n", t))
             end
         end
 
@@ -3057,6 +3112,54 @@ local function commitMultiRpp()
             local _, masterChunk = r.GetTrackStateChunk(masterTrack, "", false)
             masterChunk = replaceGroupFlagsInChunk(masterChunk, templateGroupFlags)
             r.SetTrackStateChunk(masterTrack, masterChunk, false)
+        end
+
+        -- 4d2: Apply saved envelope data to masterTrack
+        -- Reads final chunk (after all API ops), inserts/merges collected PT lines
+        if next(savedEnvBlocks) then
+            local _, mChunk = r.GetTrackStateChunk(masterTrack, "", false)
+            if mChunk then
+                local mChanged = false
+                for tag, ptLines in pairs(savedEnvBlocks) do
+                    local ptText = table.concat(ptLines, "\n")
+                    -- Find matching envelope in masterTrack chunk
+                    local tagPos = mChunk:find("\n%s*<" .. tag .. "\n", 1, false)
+                    if tagPos then
+                        -- Find closing > of this flat envelope block
+                        local afterOpen = mChunk:find("\n", tagPos + 1)
+                        if afterOpen then
+                            local closePos = mChunk:find("\n%s*>", afterOpen)
+                            if closePos then
+                                -- Remove existing PT lines and replace with saved ones
+                                local header = mChunk:sub(tagPos, afterOpen)
+                                local envBody = mChunk:sub(afterOpen + 1, closePos - 1)
+                                local nonPtLines = {}
+                                for line in envBody:gmatch("[^\n]+") do
+                                    if not line:match("^%s*PT%s+") then
+                                        nonPtLines[#nonPtLines + 1] = line
+                                    end
+                                end
+                                local newBody = table.concat(nonPtLines, "\n")
+                                if #nonPtLines > 0 then newBody = newBody .. "\n" end
+                                local closing = mChunk:sub(closePos)
+                                mChunk = mChunk:sub(1, afterOpen) .. newBody .. ptText .. closing
+                                mChanged = true
+                            end
+                        end
+                    else
+                        -- Envelope doesn't exist — create it before track closing >
+                        local trackClose = mChunk:find("\n>%s*$")
+                        if trackClose then
+                            local envBlock = "    <" .. tag .. "\n      ACT 1 -1\n      VIS 0 1 1\n      LANEHEIGHT 0 0\n      ARM 1\n      DEFSHAPE 0 -1 -1\n" .. ptText .. "\n    >"
+                            mChunk = mChunk:sub(1, trackClose - 1) .. "\n" .. envBlock .. mChunk:sub(trackClose)
+                            mChanged = true
+                        end
+                    end
+                end
+                if mChanged then
+                    r.SetTrackStateChunk(masterTrack, mChunk, false)
+                end
+            end
         end
 
         -- Set name and color

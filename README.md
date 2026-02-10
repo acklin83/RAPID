@@ -1,4 +1,4 @@
-# RAPID v2.6 - Recording Auto-Placement & Intelligent Dynamics
+# RAPID v2.6.2 - Recording Auto-Placement & Intelligent Dynamics
 
 A professional workflow tool for REAPER that combines automated track mapping with intelligent LUFS-based normalization.
 
@@ -120,7 +120,7 @@ See the built-in Help window (Help button in RAPID) for:
 
 ## VERSION
 
-Current Version: **2.6**
+Current Version: **2.6.2**
 Last Updated: February 2026
 
 ---

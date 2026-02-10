@@ -369,6 +369,43 @@ Automatically detect when the user adds, removes, or renames tracks in the REAPE
 - v2.6.2 (Feb 2026): Single-RPP marker/region/tempo import via checkbox (on commit). Fixed nameless region import (position-based pairing). Fixed multi-RPP automation merge (chunk-based envelope extraction, applied after all API ops)
 - v2.6.1 (Feb 2026): Live Template Sync — auto-detect template track changes (add/remove/rename), smart rebuild preserving mappings via name-based matching, throttled fingerprint check (~2x/sec). Multi-RPP UI cleanup — removed redundant "Match All" from table (toolbar buttons now mode-aware), added lock drag-to-paint and header toggle-all, moved drag-state reset to shared scope
 
+## Release Process (ReaPack)
+
+After every merge to `main`, update the ReaPack distribution repo:
+
+1. **Copy script:** `cp RAPID.lua /Users/stoersender/Documents/reaper-scripts/RAPID/RAPID.lua`
+2. **Update metadata header** (lines 1–35 of the reaper-scripts copy):
+   - `@version` → new version number
+   - `@changelog` → bullet points for this release (indented with 2 spaces, prefixed `--`)
+   - `@about` → only update if features changed significantly (keep stable)
+   - Leave `@description`, `@author`, `@link` unchanged
+3. **Commit and push:**
+   ```
+   cd /Users/stoersender/Documents/reaper-scripts
+   git add RAPID/RAPID.lua
+   git commit -m "v<VERSION>: <short summary>"
+   git push
+   ```
+4. **GitHub Action** (`reapack.yml`) auto-rebuilds `index.xml` on push to `main`
+
+**Repo:** `/Users/stoersender/Documents/reaper-scripts/` → `github.com/acklin83/reaper-scripts`
+
+**Metadata header format:**
+```lua
+-- @description RAPID - Recording Auto-Placement & Intelligent Dynamics
+-- @author Frank Acklin
+-- @version X.Y.Z
+-- @changelog
+--   Line 1 of changes
+--   Line 2 of changes
+-- @about
+--   # RAPID
+--   ...markdown description...
+-- @link GitHub https://github.com/acklin83/RAPID
+```
+
+The source `RAPID.lua` in this project does NOT have the `@` metadata header — it's only added in the reaper-scripts copy.
+
 ## Files
 
 | File | Purpose |

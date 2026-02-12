@@ -1,41 +1,30 @@
 # Forum Post Draft — REAPER Forum
 
 ## Instructions
-- Post in: REAPER forum → ReaScript / JSFX / Plug-in Extensions
-- Tone: casual, dev-to-dev, not marketing-speak
-- Don't oversell, don't assume too much about what people need
-- Core pitch: get a recording RPP into a mix template without losing template FX/sends/routing
-- Multi-RPP is secondary feature, mention with real example (combining separate kick/snare/toms recordings)
-- Keep it honest about what it is: a single Lua script, no magic
+- Post in: ReaScript / JSFX / Plug-in Extensions
+- Keep it short, no marketing
+- Link to GitHub repo + ReaPack
 
 ## Draft
 
-**RAPID — get your recording RPP into your mix template**
+**RAPID — Recording Auto-Placement & Intelligent Dynamics**
 
-Hey everyone,
+Made a script that gets recording tracks into a mix template. You keep your FX, sends, routing, groups, automation — everything on the template stays. Just maps recording sources to template destinations, hit commit, done.
 
-I've been working on a script called **RAPID** (Recording Auto-Placement & Intelligent Dynamics) that solves a problem I kept running into: moving tracks from a recording session into a prepared mix template without losing FX, sends, routing, or automation on the template tracks.
+Fuzzy name matching so "Kick In" finds "Kick_in". Custom aliases if your sessions use different naming.
 
-**How it works:**
-You open your mix template, run RAPID, point it at your recording .rpp, and it shows you the track list from both sides. It auto-matches tracks by name (fuzzy, so "Kick In" matches "Kick_in" etc.), you tweak what needs tweaking, hit commit, done. Your template FX chains, sends, groups — all untouched.
+**Multi-RPP:** Load multiple .rpp files into the same template. Each one gets a region, tempo/markers merge, you map per column. Had separate sessions for drums, bass, guitars — this handles that.
 
-You can also set up aliases if your recording sessions use different naming than your template (e.g. "OH L" → "Overhead L").
+**Normalization:** LUFS-based, per-instrument profiles. Calibrate from a reference item and reuse. Segment-based so silence doesn't mess it up.
 
-**Multi-RPP mode:**
-This one came out of a real need — I had separate recording sessions for kick, snare, toms, etc. and wanted them all in one mix template. Multi-RPP lets you load multiple .rpp files, each gets its own region, tempo and markers merge correctly, and you map each RPP's tracks to your template columns. Drag and drop reorder if the sequence matters.
-
-**Normalization:**
-Optional LUFS normalization with instrument profiles. You can calibrate from a reference track (e.g. "this is how loud I want my kick") and it'll match future imports to that. Segment-based measurement so it doesn't get thrown off by silence.
-
-**Other stuff:**
+**Quick rundown:**
 - Drag & drop .rpp / audio files onto the window
-- Lock tracks you don't want touched
-- Duplicate slots if one template track needs multiple sources
-- Editable track names inline
-- Dark theme (MixnoteStyle)
+- Lock tracks, duplicate slots, inline rename
+- Delete unused tracks toggle
+- Works as import-only, normalize-only, or both
 
-Requires SWS. Optional: JS_ReaScriptAPI for multi-file dialogs.
+Single Lua script, needs SWS. JS_ReaScriptAPI optional for multi-file dialogs. REAPER 6.0+.
 
-REAPER 6.0+, single Lua script, no dependencies beyond SWS.
+Install via ReaPack or grab from GitHub.
 
-Would love to hear if this is useful for anyone else or if there are workflows I haven't thought of.
+Feedback welcome — curious what workflows people would use this for.

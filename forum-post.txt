@@ -1,0 +1,76 @@
+[B]RAPID v2.6 — Recording Auto-Placement & Intelligent Dynamics[/B]
+
+Hey everyone,
+
+I've been working on a workflow tool that I think a lot of mix engineers here might find useful, and I wanted to share it.
+
+[B]The problem[/B]
+
+If you mix for other people, you know the drill: someone sends you their recording session as an .rpp file, and you need to get all those tracks into your mix template — the one with your carefully set up routing, FX chains, sends, groups, and automation. You end up manually dragging tracks around, relinking media, losing your FX... it's tedious, error-prone, and eats into actual mixing time.
+
+That's what RAPID solves.
+
+[B]What it does[/B]
+
+RAPID maps recording tracks from a source .rpp to your mix template in seconds. You load the source RPP, it auto-matches tracks using fuzzy matching (handles typos, abbreviations, naming variations), you verify/adjust the mapping, hit commit — and your template is populated with all media items while preserving every FX chain, send, routing path, and automation lane you had set up.
+
+[IMG]screenshot-placeholder-single-rpp.png[/IMG]
+
+[B]Multi-RPP Import — the big one[/B]
+
+This is where it gets interesting. If you work on projects with multiple recording sessions — live albums, multi-day sessions, episodic content — you can import [I]multiple[/I] RPP files into the same template:
+
+[LIST]
+[*]Each RPP gets its own region (auto-named from filename)
+[*]Tempo maps and time signatures from all sessions are merged correctly
+[*]Markers are imported with proper offsets
+[*]Configurable gap between sessions (in measures)
+[*]Drag-and-drop reordering of the RPP queue
+[*]Column-based mapping UI with per-RPP dropdowns
+[/LIST]
+
+I spent a lot of time getting the tempo handling right — everything is time-based (seconds), so complex sessions with tempo changes, time signature switches, and linear ramps all merge cleanly.
+
+[IMG]screenshot-placeholder-multi-rpp.png[/IMG]
+
+[B]LUFS Normalization[/B]
+
+Built-in LUFS-based normalization with instrument-specific profiles. You can set different target levels for kick, snare, vocals, bass — whatever makes sense for your workflow. It uses segment-based measurement with percentile filtering so a single loud transient doesn't throw off your reading.
+
+There's also a calibration system: select a reference item that sounds right to you, measure it, and RAPID creates a profile from that. Works great for building your own gain staging presets.
+
+[B]Other features[/B]
+
+[LIST]
+[*][B]Drag & drop[/B] — drag .rpp and audio files straight from your file manager onto the RAPID window
+[*][B]Live template sync[/B] — add/remove/rename tracks in your template while RAPID is open, mappings update automatically
+[*][B]Custom aliases[/B] — teach the matcher that "Vox" = "Lead Vocal", "KD" = "Kick Drum", etc.
+[*][B]Protected tracks[/B] — lock tracks you don't want touched
+[*][B]Editable names[/B] — double-click to rename template destinations
+[*][B]Duplicate slots[/B] — map multiple source tracks to the same destination (with independent naming)
+[*][B]Lane alignment[/B] — imported items placed on fixed lanes for easy A/B comparison
+[/LIST]
+
+[B]Requirements[/B]
+
+[LIST]
+[*]REAPER 6.0+
+[*]ReaImGui (via ReaPack)
+[*]SWS Extension (recommended)
+[*]JS_ReaScriptAPI (optional, for multi-file dialogs)
+[/LIST]
+
+[B]Install[/B]
+
+Available via [B]ReaPack[/B] — add my repo and search for RAPID:
+[URL=https://github.com/acklin83/reaper-scripts]https://github.com/acklin83/reaper-scripts[/URL]
+
+Source code and issue tracker on GitHub:
+[URL=https://github.com/acklin83/RAPID]https://github.com/acklin83/RAPID[/URL]
+
+[B]Feedback welcome[/B]
+
+This has been a passion project for the past few months and it's become a core part of my own mixing workflow. I'd love to hear from anyone who tries it — what works, what doesn't, what's missing. If you hit a bug or have a feature idea, drop it here or open an issue on GitHub.
+
+Cheers,
+Frank

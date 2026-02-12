@@ -2,29 +2,32 @@
 
 ## Instructions
 - Post in: ReaScript / JSFX / Plug-in Extensions
-- Keep it short, no marketing
+- Add screenshot(s)
 - Link to GitHub repo + ReaPack
 
 ## Draft
 
-**RAPID — Recording Auto-Placement & Intelligent Dynamics**
+**RAPID — get recording sessions into your mix template without losing anything**
 
-Made a script that gets recording tracks into a mix template. You keep your FX, sends, routing, groups, automation — everything on the template stays. Just maps recording sources to template destinations, hit commit, done.
+If you work with a mix template — FX chains, sends, routing, groups all set up — and you keep having to manually drag stuff from recording RPPs into it, this might save you some pain.
 
-Fuzzy name matching so "Kick In" finds "Kick_in". Custom aliases if your sessions use different naming.
+RAPID reads your recording .rpp, shows you both track lists side by side, auto-matches by name (fuzzy — "Kick In" matches "Kick_in"), and commits everything in one go. Template tracks keep all their FX, sends, routing, groups, automation. Recording audio just lands where it belongs.
 
-**Multi-RPP:** Load multiple .rpp files into the same template. Each one gets a region, tempo/markers merge, you map per column. Had separate sessions for drums, bass, guitars — this handles that.
+You set it up once — aliases, normalize profiles, whatever — and from then on it's: load RPP, check mappings, commit. 10 seconds for a full session import.
 
-**Normalization:** LUFS-based, per-instrument profiles. Calibrate from a reference item and reuse. Segment-based so silence doesn't mess it up.
+**Multi-RPP** — I had separate recording sessions (different days, different instruments) that all needed to go into one mix. This loads multiple .rpp files, gives each one a region, merges tempo and markers, and lets you map each RPP to your template tracks in columns. Reorder by drag and drop if the sequence matters.
 
-**Quick rundown:**
-- Drag & drop .rpp / audio files onto the window
-- Lock tracks, duplicate slots, inline rename
-- Delete unused tracks toggle
-- Works as import-only, normalize-only, or both
+**Normalization** — LUFS-based with instrument profiles. Pick a reference item that sounds right, calibrate, and it'll match everything to that level. Segment-based measurement so long silences don't throw off the reading.
 
-Single Lua script, needs SWS. JS_ReaScriptAPI optional for multi-file dialogs. REAPER 6.0+.
+**The rest:**
+- Drag & drop .rpp and audio files straight onto the window
+- Lock tracks you don't want touched
+- Duplicate slots when one template track needs multiple sources
+- Delete unused template tracks after import
+- Works as import-only, normalize-only, or both together
 
-Install via ReaPack or grab from GitHub.
+Single Lua script, ReaImGui UI. Needs SWS. JS_ReaScriptAPI optional (multi-file picker). REAPER 6.0+.
 
-Feedback welcome — curious what workflows people would use this for.
+Available on ReaPack or GitHub: [link]
+
+Let me know if you run into issues or have use cases I haven't thought of.

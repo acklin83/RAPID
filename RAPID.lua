@@ -2095,7 +2095,8 @@ end
 
 -- Build a virtual queue entry representing the existing project content
 -- Used when keepExistingMedia is enabled to let user reorder existing content vs imported RPPs
-local function buildExistingProjectEntry()
+-- Methods stored on multiRppSettings to avoid consuming top-level locals (Lua 200 limit)
+multiRppSettings.buildExistingProjectEntry = function()
     -- Calculate maxEndTime from existing template tracks' items
     local maxEndTime = 0
     for _, tr in ipairs(mixTargets) do
@@ -2187,12 +2188,12 @@ end
 
 -- Insert or update the "Existing Project" entry in the queue
 -- Returns the index where it was placed
-local function ensureExistingProjectInQueue()
+multiRppSettings.ensureExistingProjectInQueue = function()
     -- Check if already present
     for i, rpp in ipairs(rppQueue) do
         if rpp.isExisting then
             -- Update it with current project state
-            local updated = buildExistingProjectEntry()
+            local updated = multiRppSettings.buildExistingProjectEntry()
             updated.name = rpp.name  -- preserve user-edited name
             rppQueue[i] = updated
             recalculateQueueOffsets()
@@ -2201,7 +2202,7 @@ local function ensureExistingProjectInQueue()
     end
 
     -- Insert at position 1 (existing content first by default)
-    local entry = buildExistingProjectEntry()
+    local entry = multiRppSettings.buildExistingProjectEntry()
     table.insert(rppQueue, 1, entry)
 
     -- Shift multiMap columns: all existing entries move right by 1
@@ -2220,7 +2221,7 @@ local function ensureExistingProjectInQueue()
 end
 
 -- Remove the "Existing Project" entry from the queue
-local function removeExistingProjectFromQueue()
+multiRppSettings.removeExistingProjectFromQueue = function()
     for i, rpp in ipairs(rppQueue) do
         if rpp.isExisting then
             removeRppFromQueue(i)
@@ -6610,7 +6611,7 @@ local function drawUI_body()
             end
             -- Add existing project entry if keepExisting is enabled
             if multiRppSettings.keepExistingMedia then
-                ensureExistingProjectInQueue()
+                multiRppSettings.ensureExistingProjectInQueue()
             end
         end
     end
@@ -6670,9 +6671,9 @@ local function drawUI_body()
             multiRppSettings.keepExistingMedia = kemVal
             if multiRppSettings.enabled then
                 if kemVal then
-                    ensureExistingProjectInQueue()
+                    multiRppSettings.ensureExistingProjectInQueue()
                 else
-                    removeExistingProjectFromQueue()
+                    multiRppSettings.removeExistingProjectFromQueue()
                 end
             end
         end

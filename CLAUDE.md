@@ -266,6 +266,12 @@ Automatically detect when the user adds, removes, or renames tracks in the REAPE
 
 ## Resolved Issues
 
+**Abandoned: "Keep existing media" feature (v2.7 attempt)**
+
+- Concept: Preserve existing items on template tracks during import, with "Existing Project" virtual queue entry in multi-RPP mode
+- Abandoned because: The same functionality is already achievable by referencing the current open RPP as a source in the import queue — no new feature needed
+- Branch `claude/keep-existing-media-import-g2y36` was rolled back; version stays at 2.6.2
+
 **Fixed (v2.6.2): Nameless regions not imported from source RPP**
 
 - Root cause: `extractMarkersFromRpp()` used `m.name ~= ""` to identify region-start markers and `m.name == ""` to identify region-end markers. REAPER allows unnamed regions where both start and end MARKER lines have `name=""`. Unnamed region starts were misidentified as end markers and filtered out.

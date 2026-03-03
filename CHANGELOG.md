@@ -4,6 +4,36 @@ Version history for RAPID.
 
 ---
 
+## v2.7 (March 2026)
+
+**Normalize-Only Mode:**
+- Sel column with multi-select, drag-to-paint, and Shift-range selection
+- Multi-select profile/peak changes apply to all selected rows
+- Auto-match Profiles button styled consistently (sec_button, same as Import mode)
+- Removed "Reload Tracks" button
+
+**Bulk Actions:**
+- "Set all to" bulk action bar now available in all modes (Import, Import+Normalize, Normalize-only)
+- "Apply to selected" when rows are selected, "Apply to all" otherwise
+
+**Header:**
+- "Calibrate" button in header bar when Normalize mode is active (same popup as Settings)
+- Settings and Help buttons stay at fixed position regardless of Calibrate visibility
+
+**Footer:**
+- Consistent button layout across all modes (Commit/Normalize and Close at same position)
+- All footer options on single line (Delete unused, Copy media, Normalize options)
+- Normalize option labels consistent across modes ("Import to new lane", "Normalize per region")
+
+**Settings:**
+- UI and Save/Load tabs merged into "General" tab
+- Removed Little Joe profile sync
+
+**UI:**
+- Keep Name / Keep FX columns narrower (62px / 55px)
+
+---
+
 ## v2.6.2 (February 2026)
 
 **Single-RPP Marker/Region/Tempo Import:**

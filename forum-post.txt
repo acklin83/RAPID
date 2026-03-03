@@ -1,4 +1,4 @@
-[B]RAPID v2.6 — Recording Auto-Placement & Intelligent Dynamics[/B]
+[B]RAPID — Recording Auto-Placement & Intelligent Dynamics[/B]
 
 Hey everyone,
 
@@ -6,7 +6,7 @@ I've been working on a workflow tool that I think a lot of mix engineers here mi
 
 [B]The problem[/B]
 
-If you mix for other people, you know the drill: someone sends you their recording session as an .rpp file, and you need to get all those tracks into your mix template — the one with your carefully set up routing, FX chains, sends, groups, and automation. You end up manually dragging tracks around, relinking media, losing your FX... it's tedious, error-prone, and eats into actual mixing time.
+You use a Mixing Template Project but you record into a separate Project. Or you have multiple recording projects that you want to combine into one big mixing project. Now you need to get all those tracks into your mix template — the one with your carefully set up routing, FX chains, sends, groups, and automation. You end up manually dragging tracks around, relinking media, losing your FX... it's tedious, error-prone, and eats into actual mixing time.
 
 That's what RAPID solves.
 
